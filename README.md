@@ -1,6 +1,11 @@
 Souper is a superoptimizer for LLVM IR. It uses an SMT solver to help identify
 missing peephole optimizations in LLVM's midend optimizers.
 
+## misc
+We need to install `re2c` to build souper. We also need to install `z3` to run.
+
+For macOS user, run `brew install re2c z3`
+
 # Requirements
 
 Souper should work on any reasonably modern Linux or OS X machine.
