@@ -308,7 +308,6 @@ Inst *instJoin(Inst *I, Inst *Reserved, Inst *NewInst,
                std::map<Inst *, Inst *> &InstCache, InstContext &IC);
 
 void findVars(Inst *Root, std::vector<Inst *> &Vars);
-void findInsts(Inst *Root, std::vector<Inst *> &Insts, std::function<bool(Inst*)> Condition);
 
 bool hasGivenInst(Inst *Root, std::function<bool(Inst*)> InstTester);
 void getHoles(Inst *Root, std::vector<Inst *> &Holes);
