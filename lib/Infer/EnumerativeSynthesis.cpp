@@ -802,7 +802,7 @@ EnumerativeSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     return synthesizeWithAlive(SC, RHS, Guesses);
   } else {
     auto Ret = synthesizeWithKLEE(SC, RHS, Guesses);
-    if (DoubleCheckWithAlive && !Ret && RHS) {
+    if (DoubleCheckWithAlive) {
       if (isTransformationValid(LHS, RHS, PCs, IC)) {
         return Ret;
       } else {
