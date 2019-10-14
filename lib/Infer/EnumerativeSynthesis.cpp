@@ -806,12 +806,9 @@ EnumerativeSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       if (isTransformationValid(LHS, RHS, PCs, IC)) {
         return Ret;
       } else {
-        llvm::errs() << "Transformation proved wrong by alive.";
+        llvm::errs() << "RHS proved wrong by alive.";
         ReplacementContext RC;
-        RC.printInst(LHS, llvm::errs(), /*printNames=*/true);
-        llvm::errs() << "=>";
-        ReplacementContext RC2;
-        RC2.printInst(RHS, llvm::errs(), /*printNames=*/true);
+        RC.printInst(RHS, llvm::errs(), /*printNames=*/true);
         RHS = nullptr;
         std::error_code EC;
         return EC;
