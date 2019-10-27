@@ -257,6 +257,8 @@ public:
                 bool Available=true);
   Inst *getInst(Inst::Kind K, unsigned Width, const std::vector<Inst *> &Ops,
                 llvm::APInt DemandedBits, bool Available);
+
+  std::vector<Inst *> getVariables() const;
 };
 
 struct SynthesisContext {
