@@ -361,9 +361,9 @@ int SolveInst(const MemoryBufferRef &MB, Solver *S) {
     if (PrintRepl || PrintReplSplit)
       llvm::outs() << "\n";
   }
-  if ((Success + Fail + Error) > 1)
-    llvm::outs() << "successes = " << Success << ", failures = " << Fail <<
-      ", errors = " << Error << "\n";
+  // if ((Success + Fail + Error) > 1)
+  //  llvm::outs() << "successes = " << Success << ", failures = " << Fail <<
+  //    ", errors = " << Error << "\n";
   return Ret;
 }
 
