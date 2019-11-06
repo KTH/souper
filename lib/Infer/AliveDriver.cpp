@@ -240,7 +240,7 @@ performCegisFirstQuery(tools::Transform &t,
           // no more guesses, stop immediately
           if (R.isUnsat()) {
             if (DebugLevel > 3)
-              llvm::errs()<<"No more new possible guesses\n";
+              llvm::outs()<<"No more new possible guesses\n";
             return;
           } else if (R.isSat()) {
             auto &&Model = R.getModel();
