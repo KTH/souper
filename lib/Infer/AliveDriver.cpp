@@ -26,7 +26,7 @@
 #include <z3.h>
 
 extern unsigned DebugLevel;
-static const int MaxTries = 30;
+static const int MaxTries = 20000;
 
 bool startsWith(const std::string &pre, const std::string &str) {
   return std::equal(pre.begin(), pre.end(), str.begin());
