@@ -23,9 +23,9 @@
 #include <queue>
 #include <functional>
 
-static const unsigned MaxTries = 30;
-static const unsigned MaxInputSpecializationTries = 2;
-static const unsigned MaxLHSCands = 15;
+static const unsigned MaxTries = 20000;
+static const unsigned MaxInputSpecializationTries = 40;
+static const unsigned MaxLHSCands = 200000;
 
 bool UseAlive;
 unsigned DebugLevel;

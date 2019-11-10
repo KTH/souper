@@ -37,6 +37,7 @@ void souper::AddModuleToCandidateMap(InstContext &IC, ExprBuilderContext &EBC,
     FunctionCandidateSet CS = ExtractCandidates(&F, IC, EBC);
     for (auto &B : CS.Blocks) {
       for (auto &R : B->Replacements) {
+
         AddToCandidateMap(CandMap, R);
       }
     }
@@ -90,12 +91,19 @@ bool SolveCandidateMap(llvm::raw_ostream &OS, CandidateMap &M,
         return false;
       }
       if (RHS) {
+
         OS << '\n';
         OS << "; Static profile " << Profile[I] << '\n';
+
+        OS << ";[ORIGIN] ";
+        Cand.Origin->print(OS);
+        OS << "\n";
+
         Cand.Mapping.RHS = RHS;
         Cand.printFunction(OS);
         Cand.print(OS);
       }
+
     }
   } else {
     OS << "; No solver specified; listing all candidate replacements.\n";

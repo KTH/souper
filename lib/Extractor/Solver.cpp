@@ -378,6 +378,7 @@ public:
                         Inst *LHS, Inst *&RHS, InstContext &IC) override {
     std::error_code EC;
 
+
     /*
      * TODO: try to synthesize undef before synthesizing a concrete
      * integer
@@ -396,7 +397,10 @@ public:
       for (auto I : Guesses) {
         InstMapping Mapping(LHS, I);
 
-        if (UseAlive) {
+        if (UseAlive) {  // This is not been used by regular call  
+          
+          llvm::outs() << "Use Alive" << LHS;
+
           bool IsValid = isTransformationValid(Mapping.LHS, Mapping.RHS,
                                                PCs, IC);
           if (IsValid) {
@@ -406,10 +410,14 @@ public:
           // TODO: Propagate errors from Alive backend, exit early for errors
         } else {
           std::string Query = BuildQuery(IC, BPCs, PCs, Mapping, 0, /*Precondition=*/0);
+          
+
           if (Query.empty())
             return std::make_error_code(std::errc::value_too_large);
           bool IsSat;
           EC = SMTSolver->isSatisfiable(Query, IsSat, 0, 0, Timeout);
+          
+
           if (EC)
             return EC;
           if (!IsSat) {
@@ -442,7 +450,7 @@ public:
         std::set<Inst*> ConstSet{C};
         ConstantSynthesis CS;
         EC = CS.synthesize(SMTSolver.get(), BPCs, PCs, InstMapping(LHS, C), ConstSet,
-                           ResultMap, IC, /*MaxTries=*/1, Timeout);
+                           ResultMap, IC, /*MaxTries=*/20000, Timeout);
         if (ResultMap.find(C) != ResultMap.end()) {
           RHS = IC.getConst(ResultMap[C]);
           return std::error_code();
