@@ -49,9 +49,6 @@ namespace souper {
 bool SolveCandidateMap(llvm::raw_ostream &OS, CandidateMap &M,
                        Solver *S, InstContext &IC, KVStore *KVForStaticProfile) {
   if (S) {
-    OS << "; Listing valid replacements.\n";
-    OS << "; Using solver: " << S->getName() << '\n';
-
     std::vector<int> Profile;
     std::map<std::string,int> Index;
     for (int I=0; I < M.size(); ++I) {
@@ -92,16 +89,18 @@ bool SolveCandidateMap(llvm::raw_ostream &OS, CandidateMap &M,
       }
       if (RHS) {
 
-        OS << '\n';
         OS << "; Static profile " << Profile[I] << '\n';
+
+        Cand.Mapping.RHS = RHS;
+        Cand.printFunction(OS);
 
         OS << ";[ORIGIN] ";
         Cand.Origin->print(OS);
         OS << "\n";
-
-        Cand.Mapping.RHS = RHS;
-        Cand.printFunction(OS);
+        
         Cand.print(OS);
+
+        OS << ";[CANDIDATE]\n\n";
       }
 
     }
