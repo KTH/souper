@@ -108,7 +108,14 @@ bool SolveCandidateMap(llvm::raw_ostream &OS, CandidateMap &M,
     OS << "; No solver specified; listing all candidate replacements.\n";
     for (auto &Cand : M) {
       OS << '\n';
+
       Cand.printFunction(OS);
+
+
+      OS << ";[ORIGIN] ";
+      Cand.Origin->print(OS);
+      OS << "\n";
+      
       ReplacementContext Context;
       Cand.printLHS(OS, Context);
     }
