@@ -105,7 +105,7 @@ bool SolveCandidateMap(llvm::raw_ostream &OS, CandidateMap &M,
 
     }
   } else {
-    OS << "; No solver specified; listing all candidate replacements.\n";
+    // OS << "; No solver specified; listing all candidate replacements.\n";
     for (auto &Cand : M) {
       OS << '\n';
 
