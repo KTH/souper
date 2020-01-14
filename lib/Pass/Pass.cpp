@@ -48,7 +48,7 @@ using namespace llvm;
 
 namespace {
 std::unique_ptr<Solver> S;
-unsigned ReplacementIdx, ReplacementsDone;
+unsigned ReplacementIdx, ReplacementsDone, ValidReplacements, TotalCandidates;
 KVStore *KV;
 
 static cl::opt<unsigned> DebugLevel("souper-debug-level", cl::Hidden,
@@ -70,6 +70,14 @@ static cl::opt<unsigned> FirstReplace("souper-first-opt", cl::Hidden,
 static cl::opt<unsigned> LastReplace("souper-last-opt", cl::Hidden,
     cl::init(std::numeric_limits<unsigned>::max()),
     cl::desc("Last Souper optimization to perform (default=infinite)"));
+
+
+static cl::opt<bool> CountValid("souper-valid-count", cl::init(false),
+    cl::desc("Count valid replacements"));
+
+static llvm::cl::opt<std::string> SouperSubset(
+    "souper-subset", cl::Hidden,
+    llvm::cl::init(""), llvm::cl::value_desc("Subset to be applied as candidates: 1,3,6"));
 
 #ifdef DYNAMIC_PROFILE_ALL
 static const bool DynamicProfileAll = true;
@@ -442,6 +450,7 @@ public:
 
     for (auto &Cand : CandMap) {
 
+      ++TotalCandidates;
       if (StaticProfile) {
         std::string Str;
         llvm::raw_string_ostream Loc(Str);
@@ -470,6 +479,15 @@ public:
       if (!Cand.Mapping.RHS)
         continue;
 
+      if (CountValid){
+
+        if(Cand.Mapping.RHS)
+          ++ValidReplacements; 
+        // Do not replace
+        continue;
+      }
+      
+
       Instruction *I = Cand.Origin;
       assert(Cand.Mapping.LHS->hasOrigin(I));
       IRBuilder<> Builder(I);
@@ -486,6 +504,19 @@ public:
         if (DebugLevel > 1)
           errs() << "\"\n; replacement failed\n";
         continue;
+      }
+
+      if (!SouperSubset.empty()) {
+          std::string subset = SouperSubset;
+
+
+          if (subset.find(std::to_string(ReplacementIdx)) == std::string::npos) {
+            if (DebugLevel > 1)
+              errs() << "Skipping this replacement (number " << ReplacementIdx << ")\n";
+            if (ReplacementIdx < std::numeric_limits<unsigned>::max())
+              ++ReplacementIdx;
+            continue;
+          }
       }
 
       // here we finally commit to having a viable replacement
@@ -572,8 +603,14 @@ public:
     for (auto *F : FL)
       if (!F->isDeclaration())
         Changed = runOnFunction(F) || Changed;
-    if (DebugLevel > 1)
+    if (DebugLevel > 1) {
       errs() << "\nTotal of " << ReplacementsDone << " replacements done on this module\n";
+      errs() << "\nTotal of " << ReplacementIdx << " replacements candidates on this module\n";
+    }
+
+    if(CountValid)
+      errs() << "\n[" << ValidReplacements << "/" << TotalCandidates <<"]\n";
+
     return Changed;
   }
 
