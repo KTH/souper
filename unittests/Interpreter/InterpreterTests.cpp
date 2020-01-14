@@ -27,7 +27,7 @@
 
 namespace {
   static llvm::cl::opt<bool> CheckRBPrecision("check-rb-precision",
-  llvm::cl::desc("Print precision results from restricted bits exhaistive testing"),
+  llvm::cl::desc("Print precision results from restricted bits exhaustive testing"),
   llvm::cl::init(false));
 
 }
@@ -36,95 +36,103 @@ using namespace llvm;
 using namespace souper;
 
 TEST(InterpreterTests, KBTransferFunctions) {
-  KBTesting kbObj;
-  ASSERT_TRUE(kbObj.testFn(Inst::Add));
-  ASSERT_TRUE(kbObj.testFn(Inst::AddNSW));
-  ASSERT_TRUE(kbObj.testFn(Inst::Sub));
-  ASSERT_TRUE(kbObj.testFn(Inst::SubNSW));
-  ASSERT_TRUE(kbObj.testFn(Inst::Mul));
-  ASSERT_TRUE(kbObj.testFn(Inst::UDiv));
-  ASSERT_TRUE(kbObj.testFn(Inst::URem));
-  ASSERT_TRUE(kbObj.testFn(Inst::And));
-  ASSERT_TRUE(kbObj.testFn(Inst::Or));
-  ASSERT_TRUE(kbObj.testFn(Inst::Xor));
-  ASSERT_TRUE(kbObj.testFn(Inst::Shl));
-  ASSERT_TRUE(kbObj.testFn(Inst::LShr));
-  ASSERT_TRUE(kbObj.testFn(Inst::AShr));
-  ASSERT_TRUE(kbObj.testFn(Inst::Eq));
-  ASSERT_TRUE(kbObj.testFn(Inst::Ne));
-  ASSERT_TRUE(kbObj.testFn(Inst::Ult));
-  ASSERT_TRUE(kbObj.testFn(Inst::Slt));
-  ASSERT_TRUE(kbObj.testFn(Inst::Ule));
-  ASSERT_TRUE(kbObj.testFn(Inst::Sle));
-  ASSERT_TRUE(kbObj.testTernaryFn(Inst::Select, 1, WIDTH, WIDTH));
-  ASSERT_TRUE(kbObj.testTernaryFn(Inst::FShl, WIDTH, WIDTH, WIDTH));
-  ASSERT_TRUE(kbObj.testTernaryFn(Inst::FShr, WIDTH, WIDTH, WIDTH));
+  for (int WIDTH = 1; WIDTH <= MAX_WIDTH; ++WIDTH) {
+    KBTesting kbObj(WIDTH);
+    ASSERT_TRUE(kbObj.testFn(Inst::Add));
+    ASSERT_TRUE(kbObj.testFn(Inst::AddNSW));
+    ASSERT_TRUE(kbObj.testFn(Inst::AddNUW));
+    ASSERT_TRUE(kbObj.testFn(Inst::AddNW));
+    ASSERT_TRUE(kbObj.testFn(Inst::Sub));
+    ASSERT_TRUE(kbObj.testFn(Inst::SubNSW));
+    ASSERT_TRUE(kbObj.testFn(Inst::SubNUW));
+    ASSERT_TRUE(kbObj.testFn(Inst::SubNW));
+    ASSERT_TRUE(kbObj.testFn(Inst::Mul));
+    ASSERT_TRUE(kbObj.testFn(Inst::MulNSW));
+    ASSERT_TRUE(kbObj.testFn(Inst::MulNUW));
+    ASSERT_TRUE(kbObj.testFn(Inst::MulNW));
+    ASSERT_TRUE(kbObj.testFn(Inst::UDiv));
+    ASSERT_TRUE(kbObj.testFn(Inst::SDiv));
+    ASSERT_TRUE(kbObj.testFn(Inst::UDivExact));
+    ASSERT_TRUE(kbObj.testFn(Inst::SDivExact));
+    ASSERT_TRUE(kbObj.testFn(Inst::URem));
+    ASSERT_TRUE(kbObj.testFn(Inst::SRem));
+    ASSERT_TRUE(kbObj.testFn(Inst::And));
+    ASSERT_TRUE(kbObj.testFn(Inst::Or));
+    ASSERT_TRUE(kbObj.testFn(Inst::Xor));
+    ASSERT_TRUE(kbObj.testFn(Inst::Shl));
+    ASSERT_TRUE(kbObj.testFn(Inst::ShlNSW));
+    ASSERT_TRUE(kbObj.testFn(Inst::ShlNUW));
+    ASSERT_TRUE(kbObj.testFn(Inst::ShlNW));
+    ASSERT_TRUE(kbObj.testFn(Inst::LShr));
+    ASSERT_TRUE(kbObj.testFn(Inst::LShrExact));
+    ASSERT_TRUE(kbObj.testFn(Inst::AShr));
+    ASSERT_TRUE(kbObj.testFn(Inst::AShrExact));
+    ASSERT_TRUE(kbObj.testFn(Inst::Eq));
+    ASSERT_TRUE(kbObj.testFn(Inst::Ne));
+    ASSERT_TRUE(kbObj.testFn(Inst::Ult));
+    ASSERT_TRUE(kbObj.testFn(Inst::Slt));
+    ASSERT_TRUE(kbObj.testFn(Inst::Ule));
+    ASSERT_TRUE(kbObj.testFn(Inst::Sle));
+    ASSERT_TRUE(kbObj.testTernaryFn(Inst::Select, 1, WIDTH, WIDTH));
+    ASSERT_TRUE(kbObj.testTernaryFn(Inst::FShl, WIDTH, WIDTH, WIDTH));
+    ASSERT_TRUE(kbObj.testTernaryFn(Inst::FShr, WIDTH, WIDTH, WIDTH));
+  }
 }
 
 TEST(InterpreterTests, CRTransferFunctions) {
-  CRTesting crObj;
-  ASSERT_TRUE(crObj.testFn(Inst::And));
-  ASSERT_TRUE(crObj.testFn(Inst::Or));
+  for (int WIDTH = 1; WIDTH <= MAX_WIDTH; ++WIDTH) {
+    CRTesting crObj(WIDTH);
+    ASSERT_TRUE(crObj.testFn(Inst::And));
+    ASSERT_TRUE(crObj.testFn(Inst::Or));
+  }
 }
 
 TEST(InterpreterTests, RBTransferFunctions) {
-  RBTesting rbObj;
-  ASSERT_TRUE(rbObj.testFn(Inst::Add, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::AddNSW, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Sub, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::SubNSW, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Mul, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::UDiv, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::URem, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::And, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Or, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Xor, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Shl, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::LShr, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::AShr, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Eq, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Ne, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Ult, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Slt, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Ule, CheckRBPrecision));
-  ASSERT_TRUE(rbObj.testFn(Inst::Sle, CheckRBPrecision));
-  // TODO Ternary instructions
-}
+  for (int WIDTH = 1; WIDTH <= MAX_WIDTH; ++WIDTH) {
+    RBTesting rbObj(WIDTH);
+    ASSERT_TRUE(rbObj.testFn(Inst::Add, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::AddNSW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::AddNUW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::AddNW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Sub, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::SubNSW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::SubNUW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::SubNW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Mul, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::MulNSW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::MulNUW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::MulNW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::UDiv, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::SDiv, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::UDivExact, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::SDivExact, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::URem, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::SRem, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::And, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Or, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Xor, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Shl, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::ShlNSW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::ShlNUW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::ShlNW, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::LShr, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::LShrExact, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::AShr, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::AShrExact, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Eq, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Ne, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Ult, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Slt, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Ule, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFn(Inst::Sle, CheckRBPrecision));
 
-TEST(InterpreterTests, KBCRReduction) {
-  ConstantRange CR(WIDTH, /*isFullSet=*/false);
-  KnownBits KB(WIDTH);
-  do {
-    do {
-      KnownBits CalculatedKB = KB;
-      ConstantRange CalculatedCR = CR;
-      improveKBCR(CalculatedKB, CalculatedCR);
-
-      KnownBits EnumerativeKB = KB;
-      ConstantRange EnumerativeCR = CR;
-      TestingUtil::enumerativeKBCRReduction(EnumerativeKB, EnumerativeCR);
-
-      if (KnownBitsAnalysis::isConflictingKB(CalculatedKB, EnumerativeKB)) {
-        outs() << "Unsound!! CR KB reduction for KB\n";
-        outs() << "Original KB: " << KnownBitsAnalysis::knownBitsString(KB) << "\n";
-        outs() << "Original CR: " << CR << "\n";
-        outs() << "CalculatedKB: " << KnownBitsAnalysis::knownBitsString(CalculatedKB) << '\n';
-        outs() << "EnumerativeKB: " << KnownBitsAnalysis::knownBitsString(EnumerativeKB) << '\n';
-        ASSERT_TRUE(false);
-      }
-
-      if (!CalculatedCR.contains(EnumerativeCR)) {
-        outs() << "Unsound!! CR KB reduction for CR\n";
-        outs() << "Original KB: " << KnownBitsAnalysis::knownBitsString(KB) << "\n";
-        outs() << "Original CR: " << CR << "\n";
-        outs() << "CalculatedCR: " << CalculatedCR << '\n';
-        outs() << "EnumerativeCR: " << EnumerativeCR << '\n';
-        ASSERT_TRUE(false);
-      }
-
-      CR = CRTesting::nextCR(CR);
-    } while(!CR.isEmptySet());
-  } while(KBTesting::nextKB(KB));
+  }
+  for (int WIDTH = 1; WIDTH <= MAX_WIDTH - 1; ++WIDTH) {
+    RBTesting rbObj(WIDTH);
+    ASSERT_TRUE(rbObj.testFnTernary(Inst::Select, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFnTernary(Inst::FShl, CheckRBPrecision));
+    ASSERT_TRUE(rbObj.testFnTernary(Inst::FShr, CheckRBPrecision));
+  }
 }
 
 TEST(InterpreterTests, KnownBits) {
@@ -183,7 +191,7 @@ TEST(InterpreterTests, ConcreteCache) {
   InstContext IC;
 
   Inst *I1 = IC.getConst(llvm::APInt(8, 0xFF));
-  Inst *I2 = IC.getInst(Inst::Var, 8, {});
+  Inst *I2 = IC.createVar(8, "");
   Inst *I3 = IC.getInst(Inst::Or, 8, {I1, I2});
 
   ValueCache InputValues = {{I2, APInt(8, 0x00)}};

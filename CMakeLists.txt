@@ -8,7 +8,10 @@ if(NOT CMAKE_BUILD_TYPE)
       "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel." FORCE)
 endif()
 
-set(LLVM_CONFIG_EXECUTABLE ${CMAKE_SOURCE_DIR}/third_party/llvm/${CMAKE_BUILD_TYPE}/bin/llvm-config)
+if (NOT LLVM_BUILD_TYPE)
+  set(LLVM_BUILD_TYPE ${CMAKE_BUILD_TYPE})
+endif()
+set(LLVM_CONFIG_EXECUTABLE ${CMAKE_SOURCE_DIR}/third_party/llvm/${LLVM_BUILD_TYPE}/bin/llvm-config)
 if(NOT EXISTS ${LLVM_CONFIG_EXECUTABLE})
   message(FATAL_ERROR "llvm-config could not be found!")
 endif()
@@ -73,7 +76,7 @@ set(CLANG_INCLUDEDIR "${LLVM_SRC}/tools/clang/include" "${LLVM_BUILD}/tools/clan
 set(ALIVE_DIR "${CMAKE_SOURCE_DIR}/third_party/alive2")
 set(ALIVE_LDFLAGS "-L ${ALIVE_DIR}/build -lalive2")
 
-set(CLANG_LIBS "-lclangCodeGen -lclangTooling -lclangRewrite -lclangFrontend -lclangAnalysis -lclangParse -lclangSerialization -lclangSema -lclangEdit -lclangAnalysis -lclangAST -lclangDriver -lclangLex -lclangBasic")
+set(CLANG_LIBS "-lclangCodeGen -lclangTooling -lclangRewrite -lclangFrontend -lclangAnalysis -lclangParse -lclangSerialization -lclangSema -lclangEdit -lclangAnalysis -lclangAST -lclangDriver -lclangLex -lclangBasic -lclangASTMatchers")
 
 set(GTEST_CXXFLAGS "-DGTEST_HAS_RTTI=0")
 set(GTEST_INCLUDEDIR "${LLVM_SRC}/utils/unittest/googletest/include")
@@ -261,6 +264,11 @@ set(SOUPER_SOURCES
   ${SOUPER_TOOL_FILES}
   ${SOUPER_INFER_FILES})
 
+set(SOUPER_CODEGEN_FILES
+  lib/Codegen/Codegen.cpp
+  include/souper/Codegen/Codegen.h
+)
+
 add_library(souperPass SHARED
   ${KLEE_EXPR_FILES}
   ${SOUPER_SOURCES}
@@ -272,6 +280,11 @@ add_library(souperPassProfileAll SHARED
   ${SOUPER_SOURCES}
   lib/Pass/Pass.cpp
 )
+
+add_library(souperCodegen SHARED
+  ${SOUPER_CODEGEN_FILES}
+)
+
 target_compile_definitions(souperPassProfileAll PRIVATE DYNAMIC_PROFILE_ALL=1)
 
 add_executable(clang-souper
@@ -328,9 +341,10 @@ add_executable(interpreter_tests
 
 set(LLVM_LDFLAGS "${LLVM_LDFLAGS} ${ALIVE_LDFLAGS}")
 foreach(target souper internal-solver-test lexer-test parser-test souper-check count-insts
-        souper2llvm souper-interpret
-        souperExtractor souperInfer souperInst souperKVStore souperParser
-        souperSMTLIB2 souperTool souperPass souperPassProfileAll kleeExpr souperCodegen)
+               souper2llvm souper-interpret
+               souperExtractor souperInfer souperInst souperKVStore souperParser
+               souperSMTLIB2 souperTool souperPass souperPassProfileAll kleeExpr
+               souperCodegen)
   set_target_properties(${target} PROPERTIES COMPILE_FLAGS "${LLVM_CXXFLAGS}")
   target_include_directories(${target} PRIVATE "${LLVM_INCLUDEDIR}")
 endforeach()
@@ -359,6 +373,7 @@ target_link_libraries(souperSMTLIB2 ${LLVM_LIBS} ${LLVM_LDFLAGS})
 target_link_libraries(souperTool souperExtractor souperSMTLIB2)
 
 # dynamic
+target_link_libraries(souperCodegen ${PASS_LDFLAGS})
 target_link_libraries(souperPass souperCodegen ${PASS_LDFLAGS} ${HIREDIS_LIBRARY} ${ALIVE_LIBRARY} z3)
 target_link_libraries(souperPassProfileAll souperCodegen ${PASS_LDFLAGS} ${HIREDIS_LIBRARY} ${ALIVE_LIBRARY} z3)
 
@@ -401,10 +416,6 @@ configure_file(
   ${CMAKE_BINARY_DIR}/souper-check-gdb.py
 )
 
-configure_file(${CMAKE_SOURCE_DIR}/scripts/check_enumerative_guesses.py ${CMAKE_BINARY_DIR}/check_enumerative_guesses.py COPYONLY)
-configure_file(${CMAKE_SOURCE_DIR}/scripts/enum0.opt ${CMAKE_BINARY_DIR}/enum0.opt COPYONLY)
-configure_file(${CMAKE_SOURCE_DIR}/scripts/enum1.opt ${CMAKE_BINARY_DIR}/enum1.opt COPYONLY)
-
 add_custom_target(check
   COMMAND ${CMAKE_BINARY_DIR}/run_lit
   DEPENDS extractor_tests inst_tests parser-test parser_tests profileRuntime souper souper-check souper-interpret souperPass souperPassProfileAll count-insts interpreter_tests
@@ -436,7 +447,7 @@ configure_file(${CMAKE_SOURCE_DIR}/utils/cache_dump.in ${CMAKE_BINARY_DIR}/cache
 configure_file(${CMAKE_SOURCE_DIR}/utils/cache_dfa.in ${CMAKE_BINARY_DIR}/cache_dfa @ONLY)
 configure_file(${CMAKE_SOURCE_DIR}/utils/cache_import.in ${CMAKE_BINARY_DIR}/cache_import @ONLY)
 configure_file(${CMAKE_SOURCE_DIR}/utils/cache_infer.in ${CMAKE_BINARY_DIR}/cache_infer @ONLY)
-# configure_file(${CMAKE_SOURCE_DIR}/utils/souper2llvm.in ${CMAKE_BINARY_DIR}/souper2llvm @ONLY)
+configure_file(${CMAKE_SOURCE_DIR}/utils/py_souper2llvm.in ${CMAKE_BINARY_DIR}/py_souper2llvm @ONLY)
 
 if (BUILD_CLANG_TOOL)
   configure_file(${CMAKE_SOURCE_DIR}/utils/sclang.in ${CMAKE_BINARY_DIR}/sclang @ONLY)

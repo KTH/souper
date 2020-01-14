@@ -14,7 +14,7 @@
 
 #include "souper/Infer/AbstractInterpreter.h"
 #include "souper/Infer/Pruning.h"
-
+#include "souper/Extractor/Candidates.h"
 #include <cstdlib>
 
 namespace souper {
@@ -67,7 +67,7 @@ std::vector<llvm::ConstantRange> constantRangeNarrowing
       // C could be in CR, subdivide
       auto L = CR.getLower();
       auto H = CR.getUpper();
-      auto Size = CR.getSetSize();
+      auto Size = getSetSize(CR);
 
       if (L.ugt(H)) {
         // TODO(manasij): Bisect wrapped ranges instead of giving up.
@@ -166,6 +166,24 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
 
       ConstantKnownNotOne[C] = llvm::APInt(C->Width, 0);
       ConstantKnownNotZero[C] = llvm::APInt(C->Width, 0);
+    }
+  }
+
+  if (!HasHole) {
+    auto DontCareBits = DontCareBitsAnalysis().findDontCareBits(RHS);
+
+    for (auto Pair : LHSMustDemandedBits) {
+      if (DontCareBits.find(Pair.first) != DontCareBits.end() && (Pair.second & DontCareBits[Pair.first]) != 0) {
+        // This input is must demanded in LHS and DontCare in RHS.
+        if (StatsLevel > 2) {
+          llvm::errs() << "Var : " << Pair.first->Name << " : ";
+          llvm::errs() << Pair.second.toString(2, false) << "\t"
+                       << DontCareBits[Pair.first].toString(2, false) << "\n";
+          llvm::errs() << "  pruned using demanded bits analysis.\n";
+        }
+
+        return true;
+      }
     }
   }
 
@@ -349,7 +367,7 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
 
       size_t ResidualSize = 0;
       for (auto &&R : Rs) {
-        ResidualSize += R.getSetSize().getLimitedValue();
+        ResidualSize += getSetSize(R).getLimitedValue();
       }
 
       if (ResidualSize < 8192 && Rs.size() < 3) {
@@ -504,6 +522,7 @@ void PruningManager::init() {
 
   ConcreteInterpreter BlankCI;
   LHSKnownBitsNoSpec =  KnownBitsAnalysis().findKnownBits(SC.LHS, BlankCI, false);
+  LHSMustDemandedBits = MustDemandedBitsAnalysis().findMustDemandedBits(SC.LHS);
 }
 
 bool PruningManager::isInputValid(ValueCache &Cache) {

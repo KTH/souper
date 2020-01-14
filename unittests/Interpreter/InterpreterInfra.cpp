@@ -14,37 +14,20 @@
 
 #include "InterpreterInfra.h"
 
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "souper/Infer/Interpreter.h"
 #include "souper/Infer/AbstractInterpreter.h"
+#include "souper/Util/LLVMUtils.h"
+
+namespace {
+  static llvm::cl::opt<bool> DebugMode("debug-mode",
+  llvm::cl::desc("Print debugging information."),
+  llvm::cl::init(false));
+}
 
 using namespace souper;
 using namespace llvm;
-
-// CR KB reduction
-void TestingUtil::enumerativeKBCRReduction(KnownBits &KB, ConstantRange &CR) {
-  constexpr unsigned SetSize = 1 << WIDTH;
-  if (CR.isEmptySet()) {
-    KB.One = 0;
-    KB.Zero = ~0;
-
-    return;
-  }
-  // concretize both
-  std::bitset<SetSize> KBSet = concretizeKB<SetSize>(KB);
-  std::bitset<SetSize> CRSet = concretizeCR<SetSize>(CR);
-
-  // intersect
-  std::bitset<SetSize> IntersectResult = KBSet & CRSet;
-
-  // abstractize both to KB and CR
-  KnownBits FinalKB = abstractizeKB<SetSize>(KBSet);
-  ConstantRange FinalCR = abstractizeCR<SetSize>(CRSet);
-
-  KB = FinalKB;
-  CR = FinalCR;
-}
-
 
 // EvalValueKB implementation
 // -----------------------------
@@ -127,112 +110,35 @@ EvalValueKB KBTesting::bruteForce(KnownBits x, KnownBits y,
   auto zc = z.getConstant();
   EvalValue Result;
   switch (Pred) {
-    case Inst::Select:
-      Result = (xc != 0) ? yc : zc;
-      break;
-    case Inst::FShl:
-      Result = (concat(xc, yc) << (zc.urem(WIDTH))).trunc(WIDTH);
-      break;
-    case Inst::FShr:
-      Result  = (concat(xc, yc).lshr(zc.urem(WIDTH))).trunc(WIDTH);
-      break;
-    default:
-      report_fatal_error("Unhandled ternary operator.");
+  case Inst::Select:
+    Result = (xc != 0) ? yc : zc;
+    break;
+  case Inst::FShl:
+    Result = (concat(xc, yc) << (zc.urem(WIDTH))).trunc(WIDTH);
+    break;
+  case Inst::FShr:
+    Result  = (concat(xc, yc).lshr(zc.urem(WIDTH))).trunc(WIDTH);
+    break;
+  default:
+    report_fatal_error("Unhandled ternary operator.");
   }
   return Result;
 }
-EvalValueKB KBTesting::bruteForce(KnownBits x, KnownBits y, Inst::Kind Pred) {
+
+EvalValueKB KBTesting::bruteForce(KnownBits x, KnownBits y, Inst* I) {
   if (!x.isConstant())
-    return merge(bruteForce(setLowest(x), y, Pred),
-                 bruteForce(clearLowest(x), y, Pred));
+    return merge(bruteForce(setLowest(x), y, I),
+                 bruteForce(clearLowest(x), y, I));
   if (!y.isConstant())
-    return merge(bruteForce(x, setLowest(y), Pred),
-                 bruteForce(x, clearLowest(y), Pred));
+    return merge(bruteForce(x, setLowest(y), I),
+                 bruteForce(x, clearLowest(y), I));
   auto xc = x.getConstant();
   auto yc = y.getConstant();
 
-  EvalValue res;
-  APInt rc(x.getBitWidth(), 0);
-  switch (Pred) {
-  case Inst::AddNUW:
-    res = evaluateAddNUW(xc, yc);
-    break;
-  case Inst::AddNW:
-    res = evaluateAddNW(xc, yc);
-    break;
-  case Inst::AddNSW:
-    res = evaluateAddNSW(xc, yc);
-    break;
-  case Inst::Add:
-    res = EvalValue(xc + yc);
-    break;
-  case Inst::SubNUW:
-    res = evaluateSubNUW(xc, yc);
-    break;
-  case Inst::SubNSW:
-    res = evaluateSubNSW(xc, yc);
-    break;
-  case Inst::SubNW:
-    res = evaluateSubNW(xc, yc);
-    break;
-  case Inst::Sub:
-    res = EvalValue(xc - yc);
-    break;
-  case Inst::Mul:
-    res = EvalValue(xc * yc);
-    break;
-  case Inst::UDiv:
-    res = evaluateUDiv(xc, yc);
-    break;
-  case Inst::URem:
-    res = evaluateURem(xc, yc);
-    break;
-  case Inst::And:
-    rc = xc & yc;
-    break;
-  case Inst::Or:
-    rc = xc | yc;
-    break;
-  case Inst::Xor:
-    rc = xc ^ yc;
-    break;
-  case Inst::Shl:
-    res = evaluateShl(xc, yc);
-    break;
-  case Inst::LShr:
-    res = evaluateLShr(xc, yc);
-    break;
-  case Inst::AShr:
-    res = evaluateAShr(xc, yc);
-    break;
-  case Inst::Eq:
-    rc = xc.eq(yc) ? APInt(1, 1) : APInt(1, 0);
-    res = EvalValue(rc);
-    break;
-  case Inst::Ne:
-    rc = xc.ne(yc) ? APInt(1, 1) : APInt(1, 0);
-    res = EvalValue(rc);
-    break;
-  case Inst::Ult:
-    rc = xc.ult(yc) ? APInt(1, 1) : APInt(1, 0);
-    res = EvalValue(rc);
-    break;
-  case Inst::Slt:
-    rc = xc.slt(yc) ? APInt(1, 1) : APInt(1, 0);
-    res = EvalValue(rc);
-    break;
-  case Inst::Ule:
-    rc = xc.ule(yc) ? APInt(1, 1) : APInt(1, 0);
-    res = EvalValue(rc);
-    break;
-  case Inst::Sle:
-    rc = xc.sle(yc) ? APInt(1, 1) : APInt(1, 0);
-    res = EvalValue(rc);
-    break;
-  default:
-    report_fatal_error("unhandled case in bruteForce!");
-  }
-  return res;
+  ValueCache Vals{{I->Ops[0], xc}, {I->Ops[1], yc}};
+  ConcreteInterpreter C(Vals);
+  EvalValue Result = C.evaluateInst(I);
+  return Result;
 }
 
 bool KBTesting::nextKB(llvm::KnownBits &x) {
@@ -259,7 +165,7 @@ bool KBTesting::nextKB(llvm::KnownBits &x) {
 }
 
 bool testKB(llvm::KnownBits Calculated, EvalValueKB Expected,
-            Inst::Kind K, std::vector<llvm::KnownBits> KBS) {
+            Inst::Kind K, const std::vector<llvm::KnownBits> &KBS) {
   // expected value is poison/ub; so let binary transfer functions do
   // whatever they want without complaining
   if (!Expected.hasValue())
@@ -267,7 +173,7 @@ bool testKB(llvm::KnownBits Calculated, EvalValueKB Expected,
 
   if (Calculated.getBitWidth() != Expected.ValueKB.getBitWidth()) {
     llvm::errs() << "Expected and Given have unequal bitwidths - Expected: "
-                  << Expected.ValueKB.getBitWidth() << ", Given: " << Calculated.getBitWidth() << '\n';
+                 << Expected.ValueKB.getBitWidth() << ", Given: " << Calculated.getBitWidth() << '\n';
     return false;
   }
   if (Calculated.hasConflict() || Expected.ValueKB.hasConflict()) {
@@ -296,9 +202,9 @@ bool KBTesting::testTernaryFn(Inst::Kind K, size_t Op0W,
       llvm::KnownBits z(Op2W);
       do {
         InstContext IC;
-        auto Op0 = IC.getInst(Inst::Var, Op0W, {});
-        auto Op1 = IC.getInst(Inst::Var, Op1W, {});
-        auto Op2 = IC.getInst(Inst::Var, Op2W, {});
+        auto Op0 = IC.createVar(Op0W, "Op0");
+        auto Op1 = IC.createVar(Op1W, "Op1");
+        auto Op2 = IC.createVar(Op2W, "Op2");
         auto I = IC.getInst(K, WIDTH, {Op0, Op1, Op2});
         std::unordered_map<Inst *, llvm::KnownBits> C{{Op0, x}, {Op1, y}, {Op2, z}};
         KnownBitsAnalysis KB(C);
@@ -314,23 +220,23 @@ bool KBTesting::testTernaryFn(Inst::Kind K, size_t Op0W,
 
   return true;
 }
-bool KBTesting::testFn(Inst::Kind K, size_t Op0W, size_t Op1W) {
-  llvm::KnownBits x(Op0W);
+
+bool KBTesting::testFn(Inst::Kind K) {
+  llvm::KnownBits x(WIDTH);
   do {
-    llvm::KnownBits y(Op1W);
+    llvm::KnownBits y(WIDTH);
     do {
       InstContext IC;
-      auto Op0 = IC.getInst(Inst::Var, Op0W, {});
-      auto Op1 = IC.getInst(Inst::Var, Op1W, {});
+      auto Op0 = IC.createVar(WIDTH, "Op0");
+      auto Op1 = IC.createVar(WIDTH, "Op1");
       auto I = IC.getInst(K, WIDTH, {Op0, Op1});
       std::unordered_map<Inst *, llvm::KnownBits> C{{Op0, x}, {Op1, y}};
       KnownBitsAnalysis KB(C);
       ConcreteInterpreter BlankCI;
       auto Calculated = KB.findKnownBits(I, BlankCI, false);
-      EvalValueKB Expected = bruteForce(x, y, K);
-      if (!testKB(Calculated, Expected, K, {x, y})) {
+      EvalValueKB Expected = bruteForce(x, y, I);
+      if (!testKB(Calculated, Expected, K, {x, y}))
         return false;
-      }
     } while(nextKB(y));
   } while(nextKB(x));
 
@@ -424,7 +330,7 @@ ConstantRange CRTesting::bestCR(const bool Table[], const int Width) {
   return R;
 }
 
-ConstantRange CRTesting::enumerative(const ConstantRange &L, const ConstantRange &R,
+ConstantRange CRTesting::exhaustive(const ConstantRange &L, const ConstantRange &R,
                                     Inst::Kind pred, const ConstantRange &Untrusted) {
   if (L.isEmptySet() || R.isEmptySet())
     return ConstantRange(WIDTH, /*isFullSet=*/false);
@@ -476,8 +382,7 @@ ConstantRange CRTesting::enumerative(const ConstantRange &L, const ConstantRange
   return bestCR(Table, WIDTH);
 }
 
-void CRTesting::check(const ConstantRange &L, const ConstantRange &R, Inst::Kind pred,
-                      double &FastBits, double &PreciseBits, int &Count, int &PreciseCount) {
+void CRTesting::check(const ConstantRange &L, const ConstantRange &R, Inst::Kind pred) {
   ConstantRange FastRes(WIDTH, true);
   switch (pred) {
   case Inst::Or:
@@ -489,24 +394,8 @@ void CRTesting::check(const ConstantRange &L, const ConstantRange &R, Inst::Kind
   default:
     report_fatal_error("unsupported opcode");
   }
-
-  ConstantRange PreciseRes = enumerative(L, R, pred, FastRes);
-
-  long FastSize = FastRes.getSetSize().getLimitedValue();
-  long PreciseSize = PreciseRes.getSetSize().getLimitedValue();
-
-  assert(FastSize >= 0 && FastSize <= (1 << WIDTH));
-  assert(PreciseSize >= 0 && PreciseSize <= (1 << WIDTH));
-  assert(PreciseSize <= FastSize);
-
-  if (FastSize > 0) {
-    FastBits += log2((double)FastSize);
-    Count++;
-  }
-  if (PreciseSize > 0) {
-    PreciseBits += log2((double)PreciseSize);
-    PreciseCount++;
-  }
+  ConstantRange PreciseRes = exhaustive(L, R, pred, FastRes);
+  assert(getSetSize(PreciseRes).ule(getSetSize(FastRes)));
 }
 
 ConstantRange CRTesting::nextCR(const ConstantRange &CR) {
@@ -523,11 +412,9 @@ ConstantRange CRTesting::nextCR(const ConstantRange &CR) {
 bool CRTesting::testFn(Inst::Kind pred) {
   ConstantRange L(WIDTH, /*isFullSet=*/false);
   ConstantRange R(WIDTH, /*isFullSet=*/false);
-  double FastBits = 0.0, PreciseBits = 0.0;
-  int Count = 0, PreciseCount = 0;
   do {
     do {
-      check(L, R, pred, FastBits, PreciseBits, Count, PreciseCount);
+      check(L, R, pred);
       R = nextCR(R);
     } while (!R.isEmptySet());
     L = nextCR(L);
@@ -536,7 +423,11 @@ bool CRTesting::testFn(Inst::Kind pred) {
   return true;
 }
 
-bool RBTesting::nextRB(llvm::APInt& Val) {
+
+// RBTesting Implementation
+// -----------------------------
+
+bool RBTesting::nextRB(llvm::APInt &Val) {
   if (Val.isAllOnesValue()) {
     return false;
   } else {
@@ -545,12 +436,13 @@ bool RBTesting::nextRB(llvm::APInt& Val) {
   }
 }
 
-std::vector<llvm::APInt> explodeUnrestrictedBits(llvm::APInt X) {
-  std::vector<llvm::APInt> Result;
-  Result.push_back(llvm::APInt(WIDTH, 0));
+std::vector<llvm::APInt> explodeUnrestrictedBits(const llvm::APInt &Value,
+                                                 const llvm::APInt &Mask,
+                                                 const int WIDTH) {
+  std::vector<llvm::APInt> Result { Value };
 
   for (int i = 0; i < WIDTH; ++i) {
-    if ( (X & (1 << i)) == 0 ) {
+    if ( (Mask & (1 << i)) == 0 ) {
       auto Copy = Result;
       for (auto &Y : Copy) {
         Result.push_back(Y | (1 << i));
@@ -559,10 +451,11 @@ std::vector<llvm::APInt> explodeUnrestrictedBits(llvm::APInt X) {
   }
   return Result;
 }
+
 // Probably refactor to unify these two
-std::vector<llvm::APInt> explodeRestrictedBits(llvm::APInt X) {
-  std::vector<llvm::APInt> Result;
-  Result.push_back(llvm::APInt(WIDTH, 0));
+std::vector<llvm::APInt> explodeRestrictedBits(const llvm::APInt &X,
+                                               const int WIDTH) {
+  std::vector<llvm::APInt> Result { llvm::APInt(WIDTH, 0) };
 
   for (int i = 0; i < WIDTH; ++i) {
     if ( (X & (1 << i)) != 0 ) {
@@ -575,22 +468,33 @@ std::vector<llvm::APInt> explodeRestrictedBits(llvm::APInt X) {
   return Result;
 }
 
-llvm::APInt enumerativeRB(Inst *I, Inst *X, Inst *Y, llvm::APInt RBX, llvm::APInt RBY) {
+llvm::APInt exhaustiveRB(Inst *I, Inst *X, Inst *Y,
+                         const llvm::APInt &RBX, const llvm::APInt &RBY,
+                         const int WIDTH) {
   llvm::APInt RB(WIDTH, 0);
-
-  auto XPartial = explodeRestrictedBits(RBX);
-  auto YPartial = explodeRestrictedBits(RBY);
-
+  auto XPartial = explodeRestrictedBits(RBX, X->Width);
+  auto YPartial = explodeRestrictedBits(RBY, Y->Width);
+  int cases = 0;
   for (auto P0 : XPartial) {
     for (auto P1 : YPartial) {
 
-      auto I0 = explodeUnrestrictedBits(P0);
-      auto I1 = explodeUnrestrictedBits(P1);
+      if (DebugMode) {
+        llvm::outs() << "Restricted EXP: " << getPaddedBinaryString(P0) << "\t"
+                    << getPaddedBinaryString(P1) << "\n";
+      }
+
+      auto I0 = explodeUnrestrictedBits(P0, P0 | RBX, X->Width);
+      auto I1 = explodeUnrestrictedBits(P1, P1 | RBY, Y->Width);
 
       std::map<int, std::pair<bool, bool>> Seen;
 
       for (auto i0 : I0) {
         for (auto i1 : I1) {
+          if (DebugMode) {
+            llvm::outs() << "Unrestricted EXP: " << getPaddedBinaryString(i0) << "\t"
+                         << getPaddedBinaryString(i1) << "\n";
+          }
+          ++cases;
           ValueCache C = {{{X, i0}, {Y, i1}}};
           ConcreteInterpreter Interp(C);
           auto Val_ = Interp.evaluateInst(I);
@@ -613,57 +517,216 @@ llvm::APInt enumerativeRB(Inst *I, Inst *X, Inst *Y, llvm::APInt RBX, llvm::APIn
       }
     }
   }
+  if (DebugMode) {
+    llvm::outs() << "Cases : " << cases << "\n";
+  }
   return RB;
 }
 
-bool RBTesting::testFn(Inst::Kind K, bool CheckPrecision) {
+void compareRB(const llvm::APInt &RBComputed,
+               const llvm::APInt &RBExhaustive,
+               bool &fail, bool &FoundMorePrecise,
+               double &ImpreciseCount) {
+  for (int i = 0; i < RBComputed.getBitWidth(); ++i) {
+    if (((RBComputed & (1 << i)) == 0) && ((RBExhaustive & (1 << i)) != 0))
+      fail = true;
+    if (((RBExhaustive & (1 << i)) == 0) && ((RBComputed & (1 << i)) != 0)) {
+      FoundMorePrecise = true;
+      // FIXME add the number of bits, not the number of incorrect cases
+      ++ImpreciseCount;
+    }
+  }
+}
+
+bool RBTesting::testFn(const Inst::Kind K, const bool CheckPrecision) {
   llvm::APInt RB0(WIDTH, 0);
-  llvm::APInt RB1(WIDTH, 0);
   InstContext IC;
   Inst *X = IC.createVar(WIDTH, "X");
   Inst *Y = IC.createVar(WIDTH, "Y");
+  std::pair<size_t, size_t> Stats;
+  double ImpreciseCount = 0;
+
   do {
+    llvm::APInt RB1(WIDTH, 0);
     do {
       auto EffectiveWidth = WIDTH;
-      if (K == Inst::Eq || Inst::Ne || Inst::Sle || Inst::Slt || Inst::Ule || Inst::Ult) {
+      if (K == Inst::Eq || K == Inst::Ne || K == Inst::Sle
+          || K == Inst::Slt || K == Inst::Ule || K == Inst::Ult) {
         EffectiveWidth = 1;
       }
       auto Expr = IC.getInst(K, EffectiveWidth, {X, Y});
       RestrictedBitsAnalysis RBA{{{X, RB0}, {Y, RB1}}};
+
+      if (DebugMode) {
+        llvm::outs() << "RBInputs : " << getPaddedBinaryString(RB0) << "\t"
+                     << getPaddedBinaryString(RB1) << "\n";
+      }
       auto RBComputed = RBA.findRestrictedBits(Expr);
-      auto RBEnumerative = enumerativeRB(Expr, X, Y, RB0, RB1);
+      auto RBExhaustive = exhaustiveRB(Expr, X, Y, RB0, RB1, EffectiveWidth);
       bool fail = false;
       bool FoundMorePrecise = false;
-      for (int i = 0; i < Expr->Width ; ++i) {
-        if ((RBComputed & (1 << i)) == 0) {
-          if ((RBEnumerative & (1 << i)) != 0) {
-            fail = true;
-          }
-        }
-
-        if ((RBEnumerative & (1 << i)) == 0) {
-          if ((RBComputed & (1 << i)) != 0) {
-            FoundMorePrecise = true;
-          }
-        }
-
-      }
+      compareRB(RBComputed, RBExhaustive, fail, FoundMorePrecise, ImpreciseCount);
+      Stats.first++;
       if (fail) {
-        llvm::outs() << "Inputs: " << RB0.toString(2, false) << ", " << RB1.toString(2, false) << "\n";
-        llvm::outs() << "Computed << " << RBComputed.toString(2, false) << "\n";
-        llvm::outs() << "Enumerative << " << RBEnumerative.toString(2, false) << "\n";
+        llvm::outs() << Inst::getKindName(K) << ":\t";
+        llvm::outs() << "Inputs: " << getPaddedBinaryString(RB0) << ", "
+                     << getPaddedBinaryString(RB1) << "\n";
+        llvm::outs() << "Computed:   " << getPaddedBinaryString(RBComputed) << "\n";
+        llvm::outs() << "Exhaustive: " << getPaddedBinaryString(RBExhaustive) << " <-- UNSOUND!!!!\n";
         return false;
       }
-      if (CheckPrecision && FoundMorePrecise) {
-        llvm::outs() << "Found more precise result for : " << Inst::getKindName(K) << "\n";
-        llvm::outs() << "Inputs: " << RB0.toString(2, false) << ", " << RB1.toString(2, false) << "\n";
-        llvm::outs() << "Computed << " << RBComputed.toString(2, false) << "\n";
-        llvm::outs() << "Enumerative << " << RBEnumerative.toString(2, false) << "\n";
+      if (CheckPrecision) {
+        llvm::outs() << Inst::getKindName(K) << ":\t";
+        llvm::outs() << "Inputs: " << getPaddedBinaryString(RB0) << ", "
+                     << getPaddedBinaryString(RB1) << "\t";
+        llvm::outs() << "Computed:\t" << getPaddedBinaryString(RBComputed) << "\t";
+        llvm::outs() << "Exhaustive:\t" << getPaddedBinaryString(RBExhaustive);
+        if (FoundMorePrecise) {
+          llvm::outs() << "  <-- imprecise!";
+          Stats.second++;
+        }
+        llvm::outs() << "\n";
       }
     } while (nextRB(RB1));
   } while (nextRB(RB0));
+  if (CheckPrecision) {
+      llvm::outs() << "TOTAL imprecise results: " <<  Inst::getKindName(K) << " : "
+                   << Stats.second << "/" << Stats.first << "\n";
+      llvm::outs() << "TOTAL imprecise bits: " << ImpreciseCount << "\n\n";
+  }
   return true;
 }
 
+llvm::APInt exhaustiveRBTernary(Inst *I, Inst *X, Inst *Y, Inst *Z,
+                                const llvm::APInt &RBX, const llvm::APInt &RBY,
+                                const llvm::APInt &RBZ,
+                                const int WIDTH) {
+  llvm::APInt RB(WIDTH, 0);
+  auto XPartial = explodeRestrictedBits(RBX, X->Width);
+  auto YPartial = explodeRestrictedBits(RBY, Y->Width);
+  auto ZPartial = explodeRestrictedBits(RBZ, Z->Width);
+  int cases = 0;
+  double ImpreciseCount = 0;
 
+  for (auto P0 : XPartial) {
+    for (auto P1 : YPartial) {
+      for (auto P2 : ZPartial) {
+        if (DebugMode) {
+          llvm::outs() << "Restricted EXP: " << getPaddedBinaryString(P0) << "\t"
+                       << getPaddedBinaryString(P1) << "\t"
+                       << getPaddedBinaryString(P2) << "\n";
+        }
+
+        auto I0 = explodeUnrestrictedBits(P0, P0 | RBX, X->Width);
+        auto I1 = explodeUnrestrictedBits(P1, P1 | RBY, Y->Width);
+        auto I2 = explodeUnrestrictedBits(P2, P2 | RBZ, Z->Width);
+        std::map<int, std::pair<bool, bool>> Seen;
+
+        for (auto i0 : I0) {
+          for (auto i1 : I1) {
+            for (auto i2 : I2) {
+              if (DebugMode) {
+                llvm::outs() << "Unrestricted EXP: " << getPaddedBinaryString(i0) << "\t"
+                             << getPaddedBinaryString(i1) << "\t"
+                             << getPaddedBinaryString(i2) << "\n";
+              }
+              ++cases;
+              ValueCache C = {{{X, i0}, {Y, i1}, {Z, i2}}};
+              ConcreteInterpreter Interp(C);
+              auto Val_ = Interp.evaluateInst(I);
+              if (!Val_.hasValue()) {
+                continue;
+              }
+              auto Val = Val_.getValue();
+              for (int i = 0; i < WIDTH; ++i) {
+                if ((Val & (1 << i)) == 0) Seen[i].first = true;
+                if ((Val & (1 << i)) != 0) Seen[i].second = true;
+              }
+            }
+          }
+        }
+        for (int i = 0; i < WIDTH; ++i) {
+          if (!Seen[i].first || !Seen[i].second) {
+            RB = RB | (1 << i);
+          }
+        }
+      }
+    }
+  }
+  if (DebugMode) {
+    llvm::outs() << "Cases : " << cases << "\n";
+  }
+  return RB;
+}
+
+bool RBTesting::testFnTernary(const Inst::Kind K, const bool CheckPrecision) {
+  llvm::APInt RB0(WIDTH, 0);
+  InstContext IC;
+  Inst *X = IC.createVar(WIDTH, "X");
+  if (K == Inst::Select) {
+    X = IC.createVar(1, "X");
+    RB0 = llvm::APInt(1, 0);
+  }
+  Inst *Y = IC.createVar(WIDTH, "Y");
+  Inst *Z = IC.createVar(WIDTH, "Z");
+  std::pair<size_t, size_t> Stats;
+  double ImpreciseCount = 0;
+
+  do {
+    llvm::APInt RB1(WIDTH, 0);
+    do {
+      llvm::APInt RB2(WIDTH, 0);
+      do {
+        auto EffectiveWidth = WIDTH;
+        if (K == Inst::Eq || K == Inst::Ne || K == Inst::Sle
+            || K == Inst::Slt || K == Inst::Ule || K == Inst::Ult) {
+          EffectiveWidth = 1;
+        }
+        std::vector<Inst *> Ops = {X, Y, Z};
+        std::unordered_map<Inst *, llvm::APInt> RBCache = {{X, RB0},
+                                                           {Y, RB1},
+                                                           {Z, RB2}};
+        auto Expr = IC.getInst(K, EffectiveWidth, Ops);
+        RestrictedBitsAnalysis RBA{RBCache};
+
+        if (DebugMode) {
+          llvm::outs() << "RBInputs : " << getPaddedBinaryString(RB0) << "\t"
+                       << getPaddedBinaryString(RB1) << '\t'
+                       << getPaddedBinaryString(RB2);
+          llvm::outs() << '\n';
+        }
+
+        auto RBComputed = RBA.findRestrictedBits(Expr);
+        auto RBExhaustive = exhaustiveRBTernary(Expr, X, Y, Z, RB0, RB1, RB2, EffectiveWidth);
+        bool fail = false;
+        bool FoundMorePrecise = false;
+        compareRB(RBComputed, RBExhaustive, fail, FoundMorePrecise, ImpreciseCount);
+        Stats.first++;
+        if (CheckPrecision || fail) {
+          llvm::outs() << Inst::getKindName(K) << ":\t";
+          llvm::outs() << "Inputs: " << getPaddedBinaryString(RB0) << ", "
+                       << getPaddedBinaryString(RB1) << ", "
+                       << getPaddedBinaryString(RB2);
+          llvm::outs() << "\t";
+          llvm::outs() << "Computed:   " << getPaddedBinaryString(RBComputed) << "\t";
+          llvm::outs() << "Exhaustive: " << getPaddedBinaryString(RBExhaustive);
+          if (fail) {
+            llvm::outs() << " <-- UNSOUND!!!!\n";
+            return false;
+          } else if (FoundMorePrecise) {
+            llvm::outs() << "  <-- imprecise!";
+            Stats.second++;
+          }
+          llvm::outs() << "\n";
+        }
+      } while (nextRB(RB2));
+    } while (nextRB(RB1));
+  } while (nextRB(RB0));
+  if (CheckPrecision) {
+    llvm::outs() << "TOTAL imprecise results: " << Inst::getKindName(K) << " : "
+                 << Stats.second << "/" << Stats.first << "\n";
+    llvm::outs() << "TOTAL imprecise bits: " << ImpreciseCount << "\n\n";
+  }
+  return true;
+}
 

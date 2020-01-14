@@ -23,6 +23,10 @@
 
 using namespace souper;
 
+const std::string souper::ReservedConstPrefix = "reservedconst_";
+const std::string souper::ReservedInstPrefix = "reservedinst";
+const std::string souper::BlockPred = "blockpred";
+
 bool Inst::hasOrigin(llvm::Value *V) const {
   return std::find(Origins.begin(), Origins.end(), V) != Origins.end();
 }
@@ -552,6 +556,13 @@ void Inst::Profile(llvm::FoldingSetNodeID &ID) const {
     ID.AddPointer(Op);
 }
 
+#ifndef NDEBUG
+void Inst::Print() {
+  ReplacementContext RC;
+  RC.printInst(this, llvm::errs(), true);
+}
+#endif
+
 Inst *InstContext::getConst(const llvm::APInt &Val) {
   llvm::FoldingSetNodeID ID;
   ID.AddInteger(Inst::Const);
@@ -706,6 +717,9 @@ Inst *InstContext::getPhi(Block *B, const std::vector<Inst *> &Ops) {
 Inst *InstContext::getInst(Inst::Kind K, unsigned Width,
                            const std::vector<Inst *> &Ops,
                            llvm::APInt DemandedBits, bool Available) {
+  if (K == Inst::Var)
+    llvm::report_fatal_error("Use createVar() to make a var, not getInst()");
+
   std::vector<Inst *> OrderedOps;
 
   const std::vector<Inst *> *InstOps;
@@ -750,20 +764,20 @@ Inst *InstContext::getInst(Inst::Kind K, unsigned Width,
 }
 
 std::vector<Inst *> InstContext::getVariables() const {
-    std::vector<Inst *> AllVariables;
-    for (const auto &OuterIter : VarInstsByWidth) {
-        for (const auto &InnerIter : OuterIter.getSecond()) {
-            assert(InnerIter->K == Inst::Kind::Var);
-            AllVariables.emplace_back(InnerIter.get());
-        }
+  std::vector<Inst *> AllVariables;
+  for (const auto &OuterIter : VarInstsByWidth) {
+    for (const auto &InnerIter : OuterIter.getSecond()) {
+      assert(InnerIter->K == Inst::Kind::Var);
+      AllVariables.emplace_back(InnerIter.get());
     }
+  }
 
-    std::sort(AllVariables.begin(), AllVariables.end(),
-              [](const Inst *LHS, const Inst *RHS) {
-                  return LHS->Number < RHS->Number;
-              });
+  std::sort(AllVariables.begin(), AllVariables.end(),
+            [](const Inst *LHS, const Inst *RHS) {
+              return LHS->Number < RHS->Number;
+            });
 
-    return AllVariables;
+  return AllVariables;
 };
 
 bool Inst::isCommutative(Inst::Kind K) {
@@ -792,6 +806,10 @@ bool Inst::isCommutative(Inst::Kind K) {
 bool Inst::isCmp(Inst::Kind K) {
   return K == Inst::Eq || K == Inst::Ne || K == Inst::Ult ||
     K == Inst::Slt || K == Inst::Ule || K == Inst::Sle;
+}
+
+bool Inst::isTernary(Inst::Kind K) {
+  return K == Inst::Select || K == Inst::FShl || K == Inst::FShr;
 }
 
 bool Inst::isOverflowIntrinsicMain(Kind K) {
@@ -1236,6 +1254,7 @@ void souper::separateBlockPCs(const BlockPCs &BPCs, BlockPCs &BPCsCopy,
                               bool CloneVars) {
   for (const auto &BPC : BPCs) {
     auto BPCCopy = BPC;
+    assert(BlockCache[BPC.B]);
     BPCCopy.B = BlockCache[BPC.B];
     BPCCopy.PC = InstMapping(getInstCopy(BPC.PC.LHS, IC, InstCache, BlockCache, ConstMap, CloneVars),
                              getInstCopy(BPC.PC.RHS, IC, InstCache, BlockCache, ConstMap, CloneVars));

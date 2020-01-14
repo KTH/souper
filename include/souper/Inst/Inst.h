@@ -35,9 +35,9 @@ namespace souper {
 enum class HarvestType { HarvestedFromDef, HarvestedFromUse };
 
 const unsigned MaxPreds = 100000;
-const std::string ReservedConstPrefix = "reservedconst_";
-const std::string ReservedInstPrefix = "reservedinst";
-const std::string BlockPred = "blockpred";
+extern const std::string ReservedConstPrefix;
+extern const std::string ReservedInstPrefix;
+extern const std::string BlockPred;
 
 struct Inst;
 
@@ -144,6 +144,10 @@ struct Inst : llvm::FoldingSetNode {
   bool hasOrigin(llvm::Value *V) const;
 
   void Profile(llvm::FoldingSetNodeID &ID) const;
+#ifndef NDEBUG
+  // Helpful for debugging. Prints instruction using llvm::err with a newly created replacement context.
+  void Print();
+#endif
 
   static const char *getKindName(Kind K);
   static std::string getKnownBitsString(llvm::APInt Zero, llvm::APInt One);
@@ -154,6 +158,7 @@ struct Inst : llvm::FoldingSetNode {
 
   static bool isAssociative(Kind K);
   static bool isCmp(Kind K);
+  static bool isTernary(Kind K);
 
   static bool isOverflowIntrinsicMain(Kind K);
   static bool isOverflowIntrinsicSub(Kind K);
@@ -174,7 +179,7 @@ struct Inst : llvm::FoldingSetNode {
   unsigned SynthesisConstID;
   HarvestType HarvestKind;
   llvm::BasicBlock* HarvestFrom;
-  llvm::ConstantRange Range=llvm::ConstantRange(1);
+  llvm::ConstantRange Range=llvm::ConstantRange(1, true);
   std::vector<llvm::ConstantRange> RangeRefinement;
 };
 

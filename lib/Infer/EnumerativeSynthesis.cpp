@@ -73,6 +73,9 @@ namespace {
   static cl::opt<unsigned> MaxNumInstructions("souper-enumerative-synthesis-num-instructions",
     cl::desc("Maximum number of instructions to synthesize (default=1)."),
     cl::init(1));
+  static cl::opt<unsigned> MaxV("souper-enumerative-synthesis-max-verification-load",
+    cl::desc("Maximum number of guesses verified at once (default=300)."),
+    cl::init(300));
   static cl::opt<bool> EnableBigQuery("souper-enumerative-synthesis-enable-big-query",
     cl::desc("Enable big query in enumerative synthesis (default=false)"),
     cl::init(false));
@@ -109,7 +112,6 @@ namespace {
 //   tune batch size -- can be a lot bigger for simple RHSs
 //   or look for feedback from solver, timeouts etc.
 // make sure path conditions work as expected
-// remove nop synthesis
 // once an optimization works we can try adding UB qualifiers on the RHS
 //   probably almost as good as synthesizing these directly
 // prune a subtree once it becomes clear it isn't a cost win
@@ -170,12 +172,25 @@ bool CountPrune(Inst *I, std::vector<Inst *> &ReservedInsts, std::set<Inst*> Vis
   return true;
 }
 
-void getGuesses(std::vector<Inst *> &Guesses,
-                const std::vector<Inst *> &Inputs,
+//TODO(manasij/zhengyang) souper::cost needs a caching layer
+template <typename Container>
+void sortGuesses(Container &Guesses) {
+  // One of the real advantages of enumerative synthesis vs
+  // CEGIS is that we can synthesize in precisely increasing cost
+  // order, and not try to somehow teach the solver how to do that
+  std::stable_sort(Guesses.begin(), Guesses.end(),
+                   [](Inst *a, Inst *b) -> bool {
+                     return souper::cost(a) < souper::cost(b);
+                   });
+}
+
+using CallbackType = std::function<bool(Inst *)>;
+
+bool getGuesses(const std::vector<Inst *> &Inputs,
                 int Width, int LHSCost,
                 InstContext &IC, Inst *PrevInst, Inst *PrevSlot,
                 int &TooExpensive,
-                PruneFunc prune) {
+                PruneFunc prune, CallbackType Generate) {
 
   std::vector<Inst *> unaryHoleUsers;
   findInsts(PrevInst, unaryHoleUsers, [PrevSlot](Inst *I) {
@@ -454,6 +469,8 @@ void getGuesses(std::vector<Inst *> &Guesses,
       }
     }
   }
+  sortGuesses(PartialGuesses);
+  //FIXME: This is a bit heavy-handed. Find a way to eliminate this sorting.
 
   for (auto I : PartialGuesses) {
     Inst *JoinedGuess;
@@ -470,12 +487,19 @@ void getGuesses(std::vector<Inst *> &Guesses,
     // get all empty slots from the newly plugged inst
     std::vector<Inst *> CurrSlots;
     getHoles(JoinedGuess, CurrSlots);
+    //FIXME: This is inefficient, to do for each symbolic and concrete candidate
 
     // if no empty slot, then push the guess to the result list
     if (CurrSlots.empty()) {
       std::vector<Inst *> empty;
       if (prune(JoinedGuess, empty)) {
-        addGuess(JoinedGuess, JoinedGuess->Width, IC, LHSCost, Guesses, TooExpensive);
+        std::vector<Inst *> ConcreteTypedGuesses;
+        addGuess(JoinedGuess, JoinedGuess->Width, IC, LHSCost, ConcreteTypedGuesses, TooExpensive);
+        for (auto &&Guess : ConcreteTypedGuesses) {
+          if (!Generate(Guess)) {
+            return false;
+          }
+        }
       }
       continue;
     }
@@ -483,11 +507,16 @@ void getGuesses(std::vector<Inst *> &Guesses,
     // if there exist empty slots, then call getGuesses() recursively
     // and fill the empty slots
     if (prune(JoinedGuess, CurrSlots)) {
-      for (auto S : CurrSlots)
-        getGuesses(Guesses, Inputs, S->Width,
-                   LHSCost, IC, JoinedGuess, S, TooExpensive, prune);
+      for (auto S : CurrSlots) {
+        if (!getGuesses(Inputs, S->Width,
+                        LHSCost, IC, JoinedGuess,
+                        S, TooExpensive, prune, Generate)) {
+          return false;
+        }
+      }
     }
   }
+  return true;
 }
 
 Inst *findConst(souper::Inst *I,
@@ -599,16 +628,9 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, Inst *&RHS,
 
 std::error_code isConcreteCandidateSat(SynthesisContext &SC, Inst *RHSGuess, bool &IsSat) {
   std::error_code EC;
-  BlockPCs BPCsCopy;
-  std::vector<InstMapping> PCsCopy;
-  std::map<Inst *, Inst *> InstCache;
-  std::map<Block *, Block *> BlockCache;
-  separateBlockPCs(SC.BPCs, BPCsCopy, InstCache, BlockCache, SC.IC, {}, false);
-  separatePCs(SC.PCs, PCsCopy, InstCache, BlockCache, SC.IC, {}, false);
-
   InstMapping Mapping(SC.LHS, RHSGuess);
 
-  std::string Query2 = BuildQuery(SC.IC, BPCsCopy, PCsCopy, Mapping, 0, 0);
+  std::string Query2 = BuildQuery(SC.IC, SC.BPCs, SC.PCs, Mapping, 0, 0);
 
   EC = SC.SMTSolver->isSatisfiable(Query2, IsSat, 0, 0, SC.Timeout);
   if (EC && DebugLevel > 1) {
@@ -688,6 +710,7 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, Inst *&RHS,
       ReplacementContext RC;
       RC.printInst(I, llvm::errs(), /*printNames=*/true);
       llvm::errs() << "\n";
+      llvm::errs() << "Cost = " << souper::cost(I, /*IgnoreDepsWithExternalUses=*/true) << "\n";
     }
 
     std::set<Inst *> ConstSet;
@@ -731,8 +754,43 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, Inst *&RHS,
   return EC;
 }
 
-void generateAndSortGuesses(SynthesisContext &SC,
-                            std::vector<Inst *> &Guesses) {
+std::error_code verify(SynthesisContext &SC, Inst *&RHS,
+                       const std::vector<souper::Inst *> &Guesses) {
+  std::error_code EC;
+  if (SkipSolver || Guesses.empty())
+    return EC;
+
+  if (UseAlive) {
+    return synthesizeWithAlive(SC, RHS, Guesses);
+  } else {
+    auto Ret = synthesizeWithKLEE(SC, RHS, Guesses);
+    if (DoubleCheckWithAlive && !Ret && RHS) {
+      if (isTransformationValid(SC.LHS, RHS, SC.PCs, SC.IC)) {
+        return Ret;
+      } else {
+        llvm::errs() << "Transformation proved wrong by alive.";
+        ReplacementContext RC;
+        RC.printInst(SC.LHS, llvm::errs(), /*printNames=*/true);
+        llvm::errs() << "=>";
+        ReplacementContext RC2;
+        RC2.printInst(RHS, llvm::errs(), /*printNames=*/true);
+        RHS = nullptr;
+        std::error_code EC;
+        return EC;
+      }
+    }
+    return Ret;
+  }
+}
+
+std::error_code
+EnumerativeSynthesis::synthesize(SMTLIBSolver *SMTSolver,
+                                const BlockPCs &BPCs,
+                                const std::vector<InstMapping> &PCs,
+                                Inst *LHS, Inst *&RHS,
+                                InstContext &IC, unsigned Timeout) {
+  SynthesisContext SC{IC, SMTSolver, LHS, getUBInstCondition(SC.IC, SC.LHS), PCs, BPCs, Timeout};
+  std::error_code EC;
   std::vector<Inst *> Cands;
   findCands(SC.LHS, Cands, /*WidthMustMatch=*/false, /*FilterVars=*/false, MaxLHSCands);
   if (DebugLevel > 1)
@@ -757,70 +815,40 @@ void generateAndSortGuesses(SynthesisContext &SC,
     PruneFuncs.push_back(DataflowPruning.getPruneFunc());
   }
   auto PruneCallback = MkPruneFunc(PruneFuncs);
-  // TODO(zhengyangl): Refactor the syntactic pruning into a
-  // prune function here, between Cost and Dataflow
-  // TODO(manasij7479) : If RHS is concrete, evaluate both sides
-  // TODO(regehr?) : Solver assisted pruning (should be the last component)
 
-  getGuesses(Guesses, Cands, SC.LHS->Width,
-             LHSCost, SC.IC, nullptr, nullptr, TooExpensive, PruneCallback);
+
+  std::vector<Inst *> Guesses;
+  uint64_t GuessCount = 0;
+
+  auto Generate = [&SC, &Guesses, &RHS, &EC, &GuessCount](Inst *Guess) {
+    GuessCount++;
+    Guesses.push_back(Guess);
+    if (Guesses.size() >= MaxV && !SkipSolver) {
+      sortGuesses(Guesses);
+      EC = verify(SC, RHS, Guesses);
+      Guesses.clear();
+      return RHS == nullptr; // Continue if no RHS
+    }
+    return true;
+  };
+
+  // add nops guesses separately
+  for (auto I : Cands) {
+    addGuess(I, SC.LHS->Width, SC.IC, LHSCost, Guesses, TooExpensive);
+  }
+
+  getGuesses(Cands, SC.LHS->Width,
+             LHSCost, SC.IC, nullptr, nullptr, TooExpensive, PruneCallback, Generate);
+
+  if (!Guesses.empty() && !SkipSolver) {
+    EC = verify(SC, RHS, Guesses);
+  }
+
   if (DebugLevel >= 1) {
     DataflowPruning.printStats(llvm::errs());
   }
 
-  // add nops guesses separately
-  for (auto I : Inputs) {
-    addGuess(I, SC.LHS->Width, SC.IC, LHSCost, Guesses, TooExpensive);
-  }
-
-  // one of the real advantages of this approach to synthesis vs
-  // CEGIS is that we can synthesize in precisely increasing cost
-  // order, and not try to somehow teach the solver how to do that
-  std::stable_sort(Guesses.begin(), Guesses.end(),
-                   [](Inst *a, Inst *b) -> bool {
-                     return souper::cost(a) < souper::cost(b);
-                   });
-
   if (DebugLevel > 1)
-    llvm::errs() << "There are " << Guesses.size() << " Guesses\n";
-}
-
-std::error_code
-EnumerativeSynthesis::synthesize(SMTLIBSolver *SMTSolver,
-                                const BlockPCs &BPCs,
-                                const std::vector<InstMapping> &PCs,
-                                Inst *LHS, Inst *&RHS,
-                                InstContext &IC, unsigned Timeout) {
-  SynthesisContext SC{IC, SMTSolver, LHS, getUBInstCondition(SC.IC, SC.LHS), PCs, BPCs, Timeout};
-
-  std::vector<Inst *> Guesses;
-  std::error_code EC;
-  generateAndSortGuesses(SC, Guesses);
-
-  if (SkipSolver || Guesses.empty())
-    return EC;
-
-  if (UseAlive) {
-    return synthesizeWithAlive(SC, RHS, Guesses);
-  } else {
-    auto Ret = synthesizeWithKLEE(SC, RHS, Guesses);
-    if (DoubleCheckWithAlive && !Ret && RHS) {
-      if (isTransformationValid(LHS, RHS, PCs, IC)) {
-        return Ret;
-      } else {
-        llvm::errs() << "Transformation proved wrong by alive.";
-        ReplacementContext RC;
-        RC.printInst(LHS, llvm::errs(), /*printNames=*/true);
-        llvm::errs() << "=>";
-        ReplacementContext RC2;
-        RC2.printInst(RHS, llvm::errs(), /*printNames=*/true);
-        RHS = nullptr;
-        std::error_code EC;
-        return EC;
-      }
-    }
-    return Ret;
-  }
-
+    llvm::errs() << "There are " << GuessCount << " Guesses\n";
   return EC;
 }

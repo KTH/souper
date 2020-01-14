@@ -23,95 +23,95 @@ using namespace llvm;
 using namespace souper;
 
 static cl::opt<std::string>
-        InputFilename(cl::Positional,
-                      cl::desc("<input souper RHS (default=stdin)>"),
-                      cl::init("-"));
+    InputFilename(cl::Positional,
+                  cl::desc("<input souper RHS (default=stdin)>"),
+                  cl::init("-"));
 
 static cl::opt<std::string> OutputFilename(
-        "o", cl::desc("<output destination for textual LLVM IR (default=stdout)>"),
-        cl::init("-"));
+    "o", cl::desc("<output destination for textual LLVM IR (default=stdout)>"),
+    cl::init("-"));
 
 static std::vector<llvm::Type *>
 GetInputArgumentTypes(const InstContext &IC, llvm::LLVMContext &Context) {
-    const std::vector<Inst *> AllVariables = IC.getVariables();
+  const std::vector<Inst *> AllVariables = IC.getVariables();
 
-    std::vector<llvm::Type *> ArgTypes;
-    ArgTypes.reserve(AllVariables.size());
-    for (const Inst *const Var : AllVariables)
-        ArgTypes.emplace_back(Type::getIntNTy(Context, Var->Width));
+  std::vector<llvm::Type *> ArgTypes;
+  ArgTypes.reserve(AllVariables.size());
+  for (const Inst *const Var : AllVariables)
+    ArgTypes.emplace_back(Type::getIntNTy(Context, Var->Width));
 
-    return ArgTypes;
+  return ArgTypes;
 }
 
 static std::map<Inst *, Value *> GetArgsMapping(const InstContext &IC,
                                                 Function *F) {
-    std::map<Inst *, Value *> Args;
+  std::map<Inst *, Value *> Args;
 
-    const std::vector<Inst *> AllVariables = IC.getVariables();
-    for (auto zz : llvm::zip(AllVariables, F->args()))
-        Args[std::get<0>(zz)] = &(std::get<1>(zz));
+  const std::vector<Inst *> AllVariables = IC.getVariables();
+  for (auto zz : llvm::zip(AllVariables, F->args()))
+    Args[std::get<0>(zz)] = &(std::get<1>(zz));
 
-    return Args;
+  return Args;
 };
 
 int Work(const MemoryBufferRef &MB) {
-    InstContext IC;
-    ReplacementContext RC;
-    std::string ErrStr;
+  InstContext IC;
+  ReplacementContext RC;
+  std::string ErrStr;
 
-    const ParsedReplacement &RepRHS = ParseReplacementRHS(
-            IC, MB.getBufferIdentifier(), MB.getBuffer(), RC, ErrStr);
+  const ParsedReplacement &RepRHS = ParseReplacementRHS(
+      IC, MB.getBufferIdentifier(), MB.getBuffer(), RC, ErrStr);
 
-    if (!ErrStr.empty()) {
-        llvm::errs() << ErrStr << '\n';
-        return 1;
-    }
+  if (!ErrStr.empty()) {
+    llvm::errs() << ErrStr << '\n';
+    return 1;
+  }
 
-    llvm::LLVMContext Context;
-    llvm::Module Module("souper.ll", Context);
+  llvm::LLVMContext Context;
+  llvm::Module Module("souper.ll", Context);
 
-    const std::vector<llvm::Type *> ArgTypes = GetInputArgumentTypes(IC, Context);
-    const auto FT = llvm::FunctionType::get(
-            /*Result=*/Codegen::GetInstReturnType(Context, RepRHS.Mapping.RHS),
-            /*Params=*/ArgTypes, /*isVarArg=*/false);
+  const std::vector<llvm::Type *> ArgTypes = GetInputArgumentTypes(IC, Context);
+  const auto FT = llvm::FunctionType::get(
+      /*Result=*/Codegen::GetInstReturnType(Context, RepRHS.Mapping.RHS),
+      /*Params=*/ArgTypes, /*isVarArg=*/false);
 
-    Function *F = Function::Create(FT, Function::ExternalLinkage, "fun", &Module);
+  Function *F = Function::Create(FT, Function::ExternalLinkage, "fun", &Module);
 
-    const std::map<Inst *, Value *> Args = GetArgsMapping(IC, F);
+  const std::map<Inst *, Value *> Args = GetArgsMapping(IC, F);
 
-    BasicBlock *BB = BasicBlock::Create(Context, "entry", F);
+  BasicBlock *BB = BasicBlock::Create(Context, "entry", F);
 
-    llvm::IRBuilder<> Builder(Context);
-    Builder.SetInsertPoint(BB);
+  llvm::IRBuilder<> Builder(Context);
+  Builder.SetInsertPoint(BB);
 
-    Value *RetVal = Codegen(Context, &Module, Builder, /*DT*/ nullptr,
-            /*ReplacedInst*/ nullptr, Args)
-            .getValue(RepRHS.Mapping.RHS);
+  Value *RetVal = Codegen(Context, &Module, Builder, /*DT*/ nullptr,
+                          /*ReplacedInst*/ nullptr, Args)
+                      .getValue(RepRHS.Mapping.RHS);
 
-    Builder.CreateRet(RetVal);
+  Builder.CreateRet(RetVal);
 
-    // Validate the generated code, checking for consistency.
-    if (verifyFunction(*F, &llvm::errs()))
-        return 1;
-    if (verifyModule(Module, &llvm::errs()))
-        return 1;
+  // Validate the generated code, checking for consistency.
+  if (verifyFunction(*F, &llvm::errs()))
+    return 1;
+  if (verifyModule(Module, &llvm::errs()))
+    return 1;
 
-    std::error_code EC;
-    llvm::raw_fd_ostream OS(OutputFilename, EC);
-    OS << Module;
-    OS.flush();
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(OutputFilename, EC);
+  OS << Module;
+  OS.flush();
 
-    return 0;
+  return 0;
 }
 
 int main(int argc, char **argv) {
-    cl::ParseCommandLineOptions(argc, argv);
+  cl::ParseCommandLineOptions(argc, argv);
 
-    auto MB = MemoryBuffer::getFileOrSTDIN(InputFilename);
-    if (!MB) {
-        llvm::errs() << MB.getError().message() << '\n';
-        return 1;
-    }
+  auto MB = MemoryBuffer::getFileOrSTDIN(InputFilename);
+  if (!MB) {
+    llvm::errs() << MB.getError().message() << '\n';
+    return 1;
+  }
 
-    return Work((*MB)->getMemBufferRef());
+  return Work((*MB)->getMemBufferRef());
 }

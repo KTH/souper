@@ -1,4 +1,4 @@
-// Copyright 2014 The Souper Authors. All rights reserved.
+// Copyright 2019 The Souper Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,5 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#define LLVM_VERSION_MAJOR 9
-#define LLVM_VERSION_MINOR 0
+#ifndef SOUPER_UTIL_LLVMUTILS_H
+#define SOUPER_UTIL_LLVMUTILS_H
+
+namespace souper {
+
+  std::string inline getPaddedBinaryString(llvm::APInt Result) {
+    auto W = Result.getBitWidth();
+    auto Str = Result.toString(2, false);
+    while (Str.length() < W) {
+      Str = "0" + Str;
+    }
+
+    return Str;
+  }
+
+}
+
+#endif

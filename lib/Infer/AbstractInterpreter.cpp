@@ -15,10 +15,13 @@
 #include "souper/Extractor/Solver.h"
 #include "souper/Infer/Interpreter.h"
 #include "souper/Infer/AbstractInterpreter.h"
+#include "souper/Extractor/Candidates.h"
+#include "souper/Util/LLVMUtils.h"
 
 using namespace llvm;
 
 namespace {
+  using souper::getSetSize;
 
   APInt getUMin(const KnownBits &X) { return X.One; }
 
@@ -45,80 +48,12 @@ namespace {
     return Max;
   }
 
- ConstantRange KBToCR(const KnownBits &KB) {
-    ConstantRange CR1(getSMin(KB), getSMax(KB));
-    ConstantRange CR2(getSMin(KB), getSMax(KB));
-    return CR1.getSetSize().ult(CR2.getSetSize()) ? CR1 : CR2;
-  }
-
-  KnownBits CRToKB(const ConstantRange &CR) {
-    KnownBits Res(CR.getBitWidth());
-    if (CR.isFullSet())
-      return Res;
-    if (CR.isEmptySet()) {
-      Res.setAllZero();
-      return Res;
-    }
-    if (CR.isWrappedSet())
-      return Res; // TODO look for opportunities in wrapped case
-    const APInt &L = CR.getLower();
-    const APInt &U = CR.getUpper();
-    for (unsigned I = 0; I < L.getBitWidth(); ++I) {
-      // initial guess is bit from lower bound
-      bool V = L[I];
-      APInt Boundary = L;
-      // gotta be multiple faster ways to do this...
-      for (unsigned J = 0; J < I; ++J)
-        Boundary.setBit(J);
-      if (U.ugt(Boundary + 1))
-        continue;
-      if (V)
-        Res.One.setBit(I);
-      else
-        Res.Zero.setBit(I);
-    }
-    return Res;
-  }
-
-  unsigned numKnown(const KnownBits &KB) {
-    return KB.Zero.countPopulation() + KB.One.countPopulation();
-  }
-
-  KnownBits intersect(const KnownBits &KB1, const KnownBits &KB2) {
-    // ugh the constructor we want is private
-    KnownBits Res(KB1.getBitWidth());
-    Res.Zero = KB1.Zero & KB2.Zero;
-    Res.One = KB1.One & KB2.One;
-    return Res;
-  }
 } // anonymous
 
 namespace souper {
 
-  // approximate reduced product for known bits + constant range
-  void improveKBCR(KnownBits &KB, ConstantRange &CR) {
-    while (1) {
-      // measure
-      APInt SS = CR.getSetSize();
-      unsigned NK = numKnown(KB);
-      // mutual shootdown
-      auto KB2 = CRToKB(CR);
-      auto CR2 = KBToCR(KB);
-      CR = CR.intersectWith(CR2);
-      KB = intersect(KB, KB2);
-      // done when no more improvements
-      assert(CR.getSetSize().ule(SS));
-      assert(numKnown(KB) >= NK);
-      if (SS == CR.getSetSize() && NK == numKnown(KB))
-        break;
-    }
-  }
-
   bool KnownBitsAnalysis::isConflictingKB(const KnownBits &A, const KnownBits &B) {
-    if ((A.One & B.Zero) != 0 || (A.Zero & B.One) != 0) {
-      return true;
-    }
-    return false;
+    return ((A.One & B.Zero) != 0) || ((A.Zero & B.One) != 0);
   }
 
   KnownBits KnownBitsAnalysis::getMostPreciseKnownBits(KnownBits A, KnownBits B) {
@@ -448,13 +383,10 @@ namespace souper {
 
   bool isConcrete(Inst *I, bool ConsiderConsts, bool ConsiderHoles) {
     return !hasGivenInst(I, [ConsiderConsts, ConsiderHoles](Inst *instr) {
-                              if (ConsiderConsts && isReservedConst(instr))
-                                return true;
-                              if (ConsiderHoles && isHole(instr))
-                                return true;
-
-                              return false;
-                            });
+        return
+          (ConsiderConsts && isReservedConst(instr)) ||
+          (ConsiderHoles && isHole(instr));
+      });
   }
 
   // Tries to get the concrete value from @I
@@ -564,14 +496,11 @@ namespace souper {
       Result = BinaryTransferFunctionsKB::subnsw(KB0, KB1);
       break;
     case Inst::Mul:
+    case Inst::MulNSW:
+    case Inst::MulNUW:
+    case Inst::MulNW:
       Result = BinaryTransferFunctionsKB::mul(KB0, KB1);
       break;
-//   case MulNSW:
-//     return "mulnsw";
-//   case MulNUW:
-//     return "mulnuw";
-//   case MulNW:
-//     return "mulnw";
     case Inst::UDiv:
       Result = BinaryTransferFunctionsKB::udiv(KB0, KB1);
       break;
@@ -734,7 +663,7 @@ namespace souper {
         llvm::KnownBits KBW(I->Width);
         KBW.One = I->Width;
         KBW.Zero = ~I->Width;
-        auto NewKB1 = BinaryTransferFunctionsKB::urem(KB2.zext(NewKB0.getBitWidth()), KBW);
+        auto NewKB1 = BinaryTransferFunctionsKB::urem(KB2, KBW);
         Result = BinaryTransferFunctionsKB::shl(NewKB0, NewKB1).trunc(I->Width);
       }
       break;
@@ -750,7 +679,7 @@ namespace souper {
         llvm::KnownBits KBW(I->Width);
         KBW.One = I->Width;
         KBW.Zero = ~I->Width;
-        auto NewKB1 = BinaryTransferFunctionsKB::urem(KB2.zext(NewKB0.getBitWidth()), KBW);
+        auto NewKB1 = BinaryTransferFunctionsKB::urem(KB2, KBW);
         Result = BinaryTransferFunctionsKB::lshr(NewKB0, NewKB1).trunc(I->Width);
       }
       break;
@@ -822,7 +751,7 @@ namespace souper {
   llvm::ConstantRange ConstantRangeAnalysis::findConstantRange(Inst *I,
                                                                ConcreteInterpreter &CI,
                                                                bool UsePartialEval) {
-    llvm::ConstantRange Result(I->Width);
+    llvm::ConstantRange Result(I->Width, /*isFullSet=*/true);
 
     if (cacheHasValue(I))
       return CRCache.at(I);
@@ -912,7 +841,7 @@ namespace souper {
       Result = CR0.unionWith(CR1);
       break;
     case Inst::Select:
-      if (CR0.getSetSize() == 1) {
+      if (getSetSize(CR0) == 1) {
         if (CR0.contains(APInt(1, 1)))
           Result = CR1;
         else if (CR0.contains(APInt(1, 0)))
@@ -942,7 +871,7 @@ namespace souper {
   llvm::ConstantRange ConstantRangeAnalysis::findConstantRangeUsingSolver
     (Inst *I, Solver *S, std::vector<InstMapping> &PCs) {
     // FIXME implement this
-    llvm::ConstantRange Result(I->Width);
+    llvm::ConstantRange Result(I->Width, /*isFullSet=*/true);
     return Result;
   }
 #define RB0 findRestrictedBits(I->Ops[0])
@@ -966,77 +895,205 @@ namespace souper {
       // One variable can be considered unrestricted only once
       // TODO Pick a better strategy. This one chooses the DFS winner.
     } else switch (I->K) {
-      case Inst::And :
-      case Inst::Or : Result = RB0 | RB1; break;
-      case Inst::Xor : Result = RB0 & RB1; break;
 
-      // unrestricted if one of the inputs is unrestricted
-      case Inst::Ne :
-      case Inst::Eq :
-      case Inst::Ule :
-      case Inst::Sle :
-      case Inst::Add :
-      case Inst::Sub : {
-        if (RB0 == 0) {
-          Result = RB0;
-        } else if (RB1 == 0) {
-          Result = RB1;
-        }
-
-        if (Inst::isCmp(I->K) && Result.getBitWidth() > 1)
-          Result = Result.trunc(1);
-
+      case Inst::And:
+      case Inst::Or:
+        Result = RB0 | RB1;
         break;
-      }
 
-      case Inst::BitReverse : Result = RB0.reverseBits(); break;
-      case Inst::Trunc : Result = RB0.trunc(I->Width); break;
-      case Inst::BSwap : Result = RB0.byteSwap(); break;
+      case Inst::Xor:
+        Result = RB0 & RB1;
+        break;
 
-      case Inst::Select : {
-        auto Choice = std::pair{RB1, RB2};
-        if (Choice.first == 0 && Choice.second == 0) {
+      case Inst::Eq:
+      case Inst::Ne:
+        Result = (RB0 & RB1) != 0;
+        break;
+
+      // bivalent if one of the input bits is bivalent
+      // or the carry bit is bivalent
+      case Inst::Add:
+      case Inst::Sub:
+        Result = RB0 & RB1;
+        Result &= ~(~RB0 + ~RB1);
+        break;
+
+      case Inst::BitReverse:
+        Result = RB0.reverseBits();
+        break;
+
+      case Inst::Trunc:
+        Result = RB0.trunc(I->Width);
+        break;
+
+      case Inst::BSwap:
+        Result = RB0.byteSwap();
+        break;
+
+      case Inst::Select:
+        Result = (RB0 == 0) ? (RB1 & RB2) : (RB1 | RB2);
+        break;
+
+      case Inst::Ule:
+      case Inst::Sle:
+      case Inst::Ult:
+      case Inst::Slt:
+        if (RB0 == 0 && RB1 == 0)
           Result = AllZeroes;
-        } else if (RB0 == 0 && (Choice.first == 0 || Choice.second == 0)) {
-          Result = AllZeroes;
+        break;
+
+      case Inst::URem:
+      case Inst::SRem:
+        if (I->Width == 1) {
+          Result = APInt(1, 1);
         } else {
-          // nop, could be restricted
+          if (RB0 == 0 && RB1 == 0)
+            Result = AllZeroes;
         }
         break;
-      }
 
       // Only unrestricted if both inputs are unrestricted
       // TODO Verify if N(S/U)?W variants fit in this category
-      case Inst::Mul :
-      case Inst::SDiv : case Inst::UDiv : case Inst::SRem : case Inst::URem :
-      case Inst::Slt : case Inst::Ult : case Inst::LShr : case Inst::AShr :
-      case Inst::Shl : {
-        if (RB0 == 0 && RB1 == 0) {
+      case Inst::Mul:
+      case Inst::MulNSW:
+      case Inst::MulNUW:
+      case Inst::MulNW:
+      case Inst::SDiv:
+      case Inst::UDiv:
+      case Inst::Shl:
+      case Inst::LShr:
+      case Inst::ShlNSW:
+      case Inst::ShlNUW:
+      case Inst::ShlNW:
+      case Inst::AddNSW:
+      case Inst::AddNUW:
+      case Inst::AddNW:
+      case Inst::SubNSW:
+      case Inst::SubNUW:
+      case Inst::SubNW:
+        if (RB0 == 0 && RB1 == 0)
           Result = AllZeroes;
-        }
         break;
-      }
 
       // Only log2(Width) low bits can be unrestricted
-      case Inst::Ctlz :
-      case Inst::Cttz :
-      case Inst::CtPop : {
+      case Inst::Ctlz:
+      case Inst::Cttz:
+      case Inst::CtPop:
         if (RB0 == 0) {
           Result = AllZeroes;
           Result.setHighBits(I->Width - Log2_64(I->Width));
           // TODO Check for off by one issues
         }
         break;
-      }
 
-      default : break; // TODO more precise transfer functions
+      default:
+        break; // TODO more precise transfer functions
+
     }
-    if (I->K != Inst::Kind::Var) {
+    if (I->K != Inst::Var) {
       RBCache[I] = Result;
     }
     return Result;
   }
-}
 #undef RB0
 #undef RB1
 #undef RB2
+
+#define MDB0 findMustDemandedBits(I->Ops[0])
+#define MDB1 findMustDemandedBits(I->Ops[1])
+#define MDB2 findMustDemandedBits(I->Ops[2])
+#define IVARS Uses.independentVars(I->Ops[0], I->Ops[1])
+
+  InputVarInfo MustDemandedBitsAnalysis::findMustDemandedBitsImpl(souper::Inst *I) {
+    if (Cache.find(I) != Cache.end()) {
+      return Cache[I];
+    }
+    InputVarInfo Result;
+    switch (I->K) {
+      case Inst::Var:
+        Result[I] = llvm::APInt::getAllOnesValue(I->Width);
+        break;
+
+      // Ops(#) where:
+      // not exists C1, C2 forall x such that x # C1 == C2
+      case Inst::Sub:
+      case Inst::SubNSW:
+      case Inst::SubNUW:
+      case Inst::SubNW:
+      case Inst::AddNSW:
+      case Inst::AddNUW:
+      case Inst::AddNW:
+      case Inst::Add:
+      case Inst::Xor: {
+        auto A = MDB0, B = MDB1;
+        auto IV = IVARS;
+
+        for (auto &&P : A) {
+          if (IV.find(P.first) == IV.end())
+            continue;
+          Result[P.first] = P.second;
+        }
+
+        for (auto &&P : B) {
+          if (IV.find(P.first) == IV.end())
+            continue;
+          Result[P.first] = P.second;
+        }
+        break;
+      }
+
+      case Inst::And:
+      case Inst::Or: {
+        auto A = MDB0, B = MDB1;
+        auto RB0 = RB.findRestrictedBits(I->Ops[0]);
+        auto RB1 = RB.findRestrictedBits(I->Ops[1]);
+        // Take bivalent bits of opposite operand to independent variables
+        for (auto V : IVARS) {
+          if (A.find(V) == A.end())
+            A[V] = APInt::getNullValue(V->Width);
+          if (B.find(V) == B.end())
+            B[V] = APInt::getNullValue(V->Width);
+          Result[V] = (~RB1 & A[V]) | (~RB0 & B[V]);
+        }
+      }
+      default:
+        break;
+    }
+
+    Cache[I] = Result;
+
+    return Result;
+  }
+
+  InputVarInfo MustDemandedBitsAnalysis::findMustDemandedBits(souper::Inst *I) {
+    InputVarInfo Result = findMustDemandedBitsImpl(I);
+
+    // fill missing Result input variables with all zeros
+    std::vector<Inst*> Vars;
+    findVars(I, Vars);
+    for (auto &var : Vars) {
+      if (Result.find(var) == Result.end()) {
+        Result[var] = APInt::getNullValue(var->Width);
+      }
+    }
+
+    return Result;
+  }
+
+#undef MDB0
+#undef MDB1
+#undef MDB2
+
+  InputVarInfo DontCareBitsAnalysis::findDontCareBits(souper::Inst *Root) {
+    InputVarInfo Result;
+    std::vector<Inst *> Inputs;
+    findVars(Root, Inputs);
+
+    for (auto V : Inputs) {
+      Result[V] = llvm::APInt::getNullValue(V->Width);
+    }
+
+    return Result;
+  }
+
+}

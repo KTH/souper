@@ -24,7 +24,7 @@
 #include <bitset>
 
 // width used for transfer function tests
-constexpr int WIDTH = 4;
+constexpr int MAX_WIDTH = 4;
 
 namespace souper {
 
@@ -43,18 +43,26 @@ namespace souper {
       llvm::KnownBits setLowest(llvm::KnownBits x);
       llvm::KnownBits clearLowest(llvm::KnownBits x);
 
-      EvalValueKB bruteForce(llvm::KnownBits x, llvm::KnownBits y, Inst::Kind Pred);
+      EvalValueKB bruteForce(llvm::KnownBits x, llvm::KnownBits y, Inst *I);
       EvalValueKB bruteForce(llvm::KnownBits x, llvm::KnownBits y,
                              llvm::KnownBits z, Inst::Kind Pred);
+
+      const int WIDTH;
+
     public:
+      KBTesting(int _WIDTH) : WIDTH(_WIDTH) {}
       static bool nextKB(llvm::KnownBits &x);
-      bool testFn(Inst::Kind K, size_t Op0W = WIDTH, size_t Op1W = WIDTH);
+      bool testFn(Inst::Kind K);
       bool testTernaryFn(Inst::Kind K, size_t Op0W, size_t Op1W, size_t Op2W);
     };
 
     class RBTesting {
+      const int WIDTH;
+
     public:
+      RBTesting(int _WIDTH) : WIDTH(_WIDTH) {}
       bool testFn(Inst::Kind K, bool CheckPrecision);
+      bool testFnTernary(Inst::Kind K, bool CheckPrecision);
       static bool nextRB(llvm::APInt &Val);
     };
 
@@ -64,21 +72,20 @@ namespace souper {
 
       // Find the largest hole and build a llvm::ConstantRange around it
       llvm::ConstantRange bestCR(const bool Table[], const int Width);
-      llvm::ConstantRange enumerative(const llvm::ConstantRange &L, const llvm::ConstantRange &R,
+      llvm::ConstantRange exhaustive(const llvm::ConstantRange &L, const llvm::ConstantRange &R,
                                      Inst::Kind pred, const llvm::ConstantRange &Untrusted);
 
-      void check(const llvm::ConstantRange &L, const llvm::ConstantRange &R, Inst::Kind pred,
-                 double &FastBits, double &PreciseBits, int &Count, int &PreciseCount);
+      void check(const llvm::ConstantRange &L, const llvm::ConstantRange &R, Inst::Kind pred);
+
+      const int WIDTH;
 
     public:
-
+      CRTesting(int _WIDTH) : WIDTH(_WIDTH) {}
       static llvm::ConstantRange nextCR(const llvm::ConstantRange &CR);
       bool testFn(Inst::Kind pred);
     };
 
  namespace TestingUtil {
-
-    void enumerativeKBCRReduction(llvm::KnownBits &KB, llvm::ConstantRange &CR);
 
     template<int SetSize>
     std::bitset<SetSize> concretizeKB(const llvm::KnownBits &KB) {
@@ -100,7 +107,8 @@ namespace souper {
     }
 
     template<int SetSize>
-    std::bitset<SetSize> concretizeCR(const llvm::ConstantRange &CR) {
+      std::bitset<SetSize> concretizeCR(const llvm::ConstantRange &CR,
+                                        int WIDTH) {
       assert(SetSize == (1 << CR.getBitWidth()));
 
       std::bitset<SetSize> ResultSet(0);
@@ -117,7 +125,8 @@ namespace souper {
     }
 
     template<int SetSize>
-    llvm::ConstantRange abstractizeCR(std::bitset<SetSize> &ResultSet) {
+      llvm::ConstantRange abstractizeCR(std::bitset<SetSize> &ResultSet,
+                                        int WIDTH) {
       llvm::ConstantRange ResultCR(WIDTH, false);
       for (unsigned I = 0; I < SetSize; I++) {
         if (ResultSet[I]) {
@@ -129,7 +138,8 @@ namespace souper {
     }
 
     template<int SetSize>
-    llvm::KnownBits abstractizeKB(std::bitset<SetSize> &ResultSet) {
+      llvm::KnownBits abstractizeKB(std::bitset<SetSize> &ResultSet,
+                                    int WIDTH) {
       llvm::KnownBits ResultKB(WIDTH);
       if (ResultSet.none())
         return ResultKB;
