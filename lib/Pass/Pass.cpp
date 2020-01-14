@@ -605,11 +605,11 @@ public:
         Changed = runOnFunction(F) || Changed;
     if (DebugLevel > 1) {
       errs() << "\nTotal of " << ReplacementsDone << " replacements done on this module\n";
-      errs() << "\nTotal of " << ReplacementIdx << " replacements candidates on this module\n";
+      errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
 
     if(CountValid)
-      errs() << "\n[" << ValidReplacements << "/" << TotalCandidates <<"]\n";
+      errs() << "[" << ValidReplacements << "/" << TotalCandidates <<"]\n";
 
     return Changed;
   }
