@@ -23,6 +23,14 @@ using namespace souper;
 static cl::opt<unsigned> RedisPort("souper-redis-port", cl::init(6379),
     cl::desc("Redis server port (default=6379)"));
 
+
+static cl::opt<std::string> RedisHost("souper-redis-host", cl::init("127.0.0.1"),
+    cl::desc("Redis server host (default=127.0.0.1)"));
+
+  
+static cl::opt<std::string> RedisPass("souper-redis-pass", cl::init(""),
+    cl::desc("Redis server pass (default=<empty>)"));
+
 namespace souper {
 
 class KVStore::KVImpl {
@@ -36,15 +44,21 @@ public:
 };
 
 KVStore::KVImpl::KVImpl() {
-  const char *hostname = "127.0.0.1";
-  struct timeval Timeout = { 1, 500000 }; // 1.5 seconds
-  Ctx = redisConnectWithTimeout(hostname, RedisPort, Timeout);
+  std::string host = RedisHost;  
+  std::string pass = RedisPass;
+
+  struct timeval Timeout = { 5, 500000 }; // 1.5 seconds
+  Ctx = redisConnectWithTimeout(host.c_str(), RedisPort, Timeout);
   if (!Ctx) {
     llvm::report_fatal_error("Can't allocate redis context\n");
   }
   if (Ctx->err) {
-    llvm::report_fatal_error((llvm::StringRef)"Redis connection error: " +
+    llvm::report_fatal_error((llvm::StringRef)"Redis connection error: " + host.c_str() + " "
                              Ctx->errstr + "\n");
+  }
+
+  if (!RedisPass.empty() && Ctx){
+    redisCommand(Ctx, "AUTH %s",  RedisPass.c_str());
   }
 }
 
