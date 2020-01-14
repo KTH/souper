@@ -48,12 +48,12 @@ KVStore::KVImpl::KVImpl() {
   std::string pass = RedisPass;
 
   struct timeval Timeout = { 5, 500000 }; // 1.5 seconds
-  Ctx = redisConnectWithTimeout(host.c_str(), RedisPort, Timeout);
+  Ctx = redisConnect(host.c_str(), RedisPort);
   if (!Ctx) {
     llvm::report_fatal_error("Can't allocate redis context\n");
   }
   if (Ctx->err) {
-    llvm::report_fatal_error((llvm::StringRef)"Redis connection error: " + host.c_str() + " "
+    llvm::report_fatal_error((llvm::StringRef)"Redis connection error: " + host.c_str() + (llvm::StringRef)" " + 
                              Ctx->errstr + "\n");
   }
 
