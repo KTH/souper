@@ -165,15 +165,6 @@ add_library(souperClangTool STATIC
   ${SOUPER_CLANG_TOOL_FILES}
 )
 
-set(SOUPER_CODEGEN_FILES
-  lib/Codegen/Codegen.cpp
-  include/souper/Codegen/Codegen.h
-)
-
-add_library(souperCodegen STATIC
-  ${SOUPER_CODEGEN_FILES}
-)
-
 set(SOUPER_EXTRACTOR_FILES
   lib/Extractor/Candidates.cpp
   lib/Extractor/ExprBuilder.cpp
