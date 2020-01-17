@@ -65,8 +65,6 @@ llvm_builddir=$(pwd)/${llvm_srcdir}/${llvm_build_type}-build
 svn co https://llvm.org/svn/llvm-project/llvm/${llvm_branch} ${llvm_srcdir}
 svn co https://llvm.org/svn/llvm-project/cfe/${llvm_branch} ${llvm_srcdir}/tools/clang
 svn co https://llvm.org/svn/llvm-project/compiler-rt/${llvm_branch} ${llvm_srcdir}/projects/compiler-rt
-svn co https://llvm.org/svn/llvm-project/libcxx/${llvm_branch} ${llvm_srcdir}/projects/libcxx
-svn co https://llvm.org/svn/llvm-project/libcxxabi/${llvm_branch} ${llvm_srcdir}/projects/libcxxabi
 # Disable the broken select -> logic optimizations
 patch ${llvm_srcdir}/lib/Transforms/InstCombine/InstCombineSelect.cpp < patches/disable-instcombine-select-to-logic.patch
 # Apply instcombine switch patch
@@ -74,7 +72,7 @@ patch -d ${llvm_srcdir} -p0 -i $(pwd)/patches/enable-instcombine-switch.patch
 
 mkdir -p $llvm_builddir
 
-cmake_flags=".. -DCMAKE_INSTALL_PREFIX=$llvm_installdir -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_FORCE_ENABLE_STATS=On -DLLVM_TARGETS_TO_BUILD=host -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly -DCMAKE_BUILD_TYPE=$llvm_build_type -DZ3_INCLUDE_DIR=$z3_installdir/include -DZ3_LIBRARIES=$z3_installdir/lib/libz3.a -DZ3_EXECUTABLE=$z3_installdir/bin/z3"
+cmake_flags=".. -DCMAKE_INSTALL_PREFIX=$llvm_installdir -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_FORCE_ENABLE_STATS=On -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly -DLLVM_TARGETS_TO_BUILD=host -DCMAKE_BUILD_TYPE=$llvm_build_type -DZ3_INCLUDE_DIR=$z3_installdir/include -DZ3_LIBRARIES=$z3_installdir/lib/libz3.a"
 
 if [ -n "`which ninja`" ] ; then
   (cd $llvm_builddir && cmake -G Ninja $cmake_flags "$@")
