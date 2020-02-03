@@ -280,13 +280,6 @@ public:
       if (!Cand.Mapping.RHS)
         continue;
 
-      if (CountValid){
-
-        if(Cand.Mapping.RHS)
-          ++ValidReplacements; 
-        // Do not replace
-        continue;
-      }
       
 
       Instruction *I = Cand.Origin;
@@ -304,6 +297,15 @@ public:
       if (!NewVal) {
         if (DebugLevel > 1)
           errs() << "\"\n; replacement failed\n";
+        continue;
+      }
+
+
+      if (CountValid){
+
+        if(Cand.Mapping.RHS)
+          ++ValidReplacements; 
+        // Do not replace
         continue;
       }
 
