@@ -287,7 +287,7 @@ public:
       if (CountValid){
 
         if(Cand.Mapping.RHS)
-          nametext = nametext << "," << ReplacementIdx;
+          nametext = nametext + "," + ReplacementIdx;
         continue;
       }
       
