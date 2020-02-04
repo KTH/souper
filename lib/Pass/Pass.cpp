@@ -409,9 +409,9 @@ public:
     for (auto *F : FL)
       if (!F->isDeclaration())
         Changed = runOnFunction(F) || Changed;
-    if (DebugLevel > 1) {
-        errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
-       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
+    if (DebugLevel > 1) {      
+      errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
+      errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
 
     if(CountValid)
@@ -420,7 +420,7 @@ public:
     return Changed;
   }
 
-// }
+};
 
 char SouperPass::ID = 0;
 }
