@@ -49,7 +49,7 @@ using namespace llvm;
 
 namespace {
 std::unique_ptr<Solver> S;
-unsigned ReplacementIdx, ReplacementsDones, TotalCandidates;
+unsigned ReplacementIdx, ReplacementsDone, TotalCandidates;
 KVStore *KV;
 
 std::string nametext;
@@ -410,7 +410,8 @@ public:
       if (!F->isDeclaration())
         Changed = runOnFunction(F) || Changed;
     if (DebugLevel > 1) {
-      errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
+        errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
+       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
 
     if(CountValid)
