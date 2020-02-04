@@ -280,9 +280,8 @@ public:
       if (!Cand.Mapping.RHS)
         continue;
 
-      if (CountValid){
-
-        if(Cand.Mapping.RHS)
+      if (CountValid) {
+        if(Cand.Mapping.RHSs)
           ++ValidReplacements; 
         // Do not replace
         continue;
