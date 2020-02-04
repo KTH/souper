@@ -49,8 +49,11 @@ using namespace llvm;
 
 namespace {
 std::unique_ptr<Solver> S;
-unsigned ReplacementIdx, ReplacementsDone, ValidReplacements, TotalCandidates;
+unsigned ReplacementIdx, ReplacementsDones, TotalCandidates;
 KVStore *KV;
+
+string ValidReplacements;
+
 
 static cl::opt<unsigned> DebugLevel("souper-debug-level", cl::Hidden,
      cl::init(1),
@@ -198,6 +201,8 @@ public:
 
   bool runOnFunction(Function *F) {
     bool Changed = false;
+    nametext = "";
+
     InstContext IC;
     ExprBuilderContext EBC;
     std::map<Inst *, Value *> ReplacedValues;
@@ -277,16 +282,17 @@ public:
           report_fatal_error("Unable to query solver: " + EC.message() + "\n");
         }
       }
-      if (!Cand.Mapping.RHS)
-        continue;
 
-      if (CountValid) {
-        if(Cand.Mapping.RHSs)
-          ++ValidReplacements; 
-        // Do not replace
+
+      if (CountValid){
+
+        if(Cand.Mapping.RHS)
+          nametext = nametext << "," << ReplacementIdx;
         continue;
       }
       
+      if (!Cand.Mapping.RHS)
+        continue;
 
       Instruction *I = Cand.Origin;
       assert(Cand.Mapping.LHS->hasOrigin(I));
@@ -303,15 +309,6 @@ public:
       if (!NewVal) {
         if (DebugLevel > 1)
           errs() << "\"\n; replacement failed\n";
-        continue;
-      }
-
-
-      if (CountValid){
-
-        if(Cand.Mapping.RHS)
-          ++ValidReplacements; 
-        // Do not replace
         continue;
       }
 
@@ -413,12 +410,11 @@ public:
       if (!F->isDeclaration())
         Changed = runOnFunction(F) || Changed;
     if (DebugLevel > 1) {
-      errs() << "\nTotal of " << ReplacementsDone << " replacements done on this module\n";
       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
 
     if(CountValid)
-      errs() << "[" << ValidReplacements << "/" << TotalCandidates <<"]\n";
+      errs() << "[" << nametext << "/" << TotalCandidates <<"]\n";
 
     return Changed;
   }
