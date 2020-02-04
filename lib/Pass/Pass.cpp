@@ -52,7 +52,7 @@ std::unique_ptr<Solver> S;
 unsigned ReplacementIdx, ReplacementsDones, TotalCandidates;
 KVStore *KV;
 
-string ValidReplacements;
+string nametext;
 
 
 static cl::opt<unsigned> DebugLevel("souper-debug-level", cl::Hidden,
