@@ -287,7 +287,7 @@ public:
       if (CountValid){
 
         if(Cand.Mapping.RHS)
-          nametext = nametext + "," + std::to_string(ReplacementIdx);
+          nametext = nametext + "," + std::to_string(ReplacementIdx++);
         continue;
       }
       
@@ -420,7 +420,7 @@ public:
     return Changed;
   }
 
-};
+// }
 
 char SouperPass::ID = 0;
 }
