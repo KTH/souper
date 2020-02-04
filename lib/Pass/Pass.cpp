@@ -306,6 +306,15 @@ public:
         continue;
       }
 
+
+      if (CountValid){
+
+        if(Cand.Mapping.RHS)
+          ++ValidReplacements; 
+        // Do not replace
+        continue;
+      }
+
       if (!SouperSubset.empty()) {
           std::string subset = SouperSubset;
 
