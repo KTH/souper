@@ -286,8 +286,10 @@ public:
 
       if (CountValid){
 
-        if(Cand.Mapping.RHS)
-          nametext = nametext + "," + std::to_string(ReplacementIdx++);
+        if(Cand.Mapping.RHS) {
+          nametext = nametext + "," + std::to_string(ReplacementIdx);
+          ++ReplacementIdx;
+        }
         continue;
       }
       
