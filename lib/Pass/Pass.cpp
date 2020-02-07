@@ -288,8 +288,8 @@ public:
 
         if(Cand.Mapping.RHS) {
           nametext = nametext + "," + std::to_string(ReplacementIdx);
-          ++ReplacementIdx;
         }
+        ++ReplacementIdx;
         continue;
       }
       
