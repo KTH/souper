@@ -283,16 +283,6 @@ public:
         }
       }
 
-
-      if (CountValid){
-
-        if(Cand.Mapping.RHS) {
-          nametext = nametext + "," + std::to_string(ReplacementIdx);
-        }
-        ++ReplacementIdx;
-        continue;
-      }
-      
       if (!Cand.Mapping.RHS)
         continue;
 
@@ -338,7 +328,15 @@ public:
       }
       if (ReplacementIdx < std::numeric_limits<unsigned>::max())
         ++ReplacementIdx;
+
       ReplacementsDone++;
+
+      if (CountValid){
+        if(Cand.Mapping.RHS) {
+          nametext = nametext + "," + std::to_string(ReplacementIdx);
+        }
+      }
+      
 
       if (Cand.Mapping.LHS->HarvestKind == HarvestType::HarvestedFromDef)
         ReplacedValues[Cand.Mapping.LHS] = NewVal;
