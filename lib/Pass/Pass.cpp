@@ -359,6 +359,8 @@ public:
       }
 
       if (CountValid){
+        errs() << "subset " << ReplacementIdx - 1 << "\n";
+        
         nametext = nametext + "," + std::to_string(ReplacementIdx - 1);
       }
 
