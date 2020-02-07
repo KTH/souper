@@ -331,13 +331,6 @@ public:
 
       ReplacementsDone++;
 
-      if (CountValid){
-        if(Cand.Mapping.RHS) {
-          nametext = nametext + "," + std::to_string(ReplacementIdx - 1);
-        }
-      }
-      
-
       if (Cand.Mapping.LHS->HarvestKind == HarvestType::HarvestedFromDef)
         ReplacedValues[Cand.Mapping.LHS] = NewVal;
 
@@ -363,6 +356,10 @@ public:
         errs() << "\"\n; with \"";
         NewVal->print(errs());
         errs() << "\"\n";
+      }
+
+      if (CountValid){
+        nametext = nametext + "," + std::to_string(ReplacementIdx - 1);
       }
 
       if (DynamicProfile)
