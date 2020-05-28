@@ -429,6 +429,9 @@ public:
       errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
+    if(CountValid)
+      errs() << "[" << nametext << "/" << TotalCandidates <<"]\n";
+      
     return Changed;
   }
 
