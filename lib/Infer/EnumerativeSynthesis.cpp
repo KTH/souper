@@ -26,7 +26,9 @@
 
 static const unsigned MaxTries = 20000;
 static const unsigned MaxInputSpecializationTries = 40;
-static const unsigned MaxLHSCands = 200000;
+
+
+//static const unsigned MaxLHSCands = 200000;
 
 // static const unsigned MaxTries = 30;
 // static const unsigned MaxInputSpecializationTries = 2;
