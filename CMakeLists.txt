@@ -71,7 +71,7 @@ execute_process(
 )
 
 set(CLANG_CXXFLAGS "")
-set(CLANG_INCLUDEDIR "${LLVM_SRC}/tools/clang/include" "${LLVM_BUILD}/tools/clang/include")
+set(CLANG_INCLUDEDIR "${LLVM_SRC}/../clang/include" "${LLVM_BUILD}/tools/clang/include")
 
 set(ALIVE_DIR "${CMAKE_SOURCE_DIR}/third_party/alive2")
 set(ALIVE_LDFLAGS "-L ${ALIVE_DIR}/build -lalive2")
@@ -142,7 +142,7 @@ include_directories(${Z3_INCLUDE_DIRECTORY})
 
 find_library(Z3_LIBRARY
   NAMES
-  libz3.a
+  z3
   PATHS
   third_party/z3-install/lib
   NO_DEFAULT_PATH)
@@ -409,7 +409,7 @@ configure_file(
 
 add_custom_target(check
   COMMAND ${CMAKE_BINARY_DIR}/run_lit
-  DEPENDS extractor_tests inst_tests parser-test parser_tests profileRuntime souper souper-check souper-interpret souperPass souperPassProfileAll count-insts interpreter_tests
+  DEPENDS extractor_tests inst_tests parser-test parser_tests profileRuntime souper souper-check souper-interpret souper2llvm souperPass souperPassProfileAll count-insts interpreter_tests
   USES_TERMINAL)
 
 find_program(GO_EXECUTABLE NAMES go DOC "go executable")

@@ -272,22 +272,22 @@ bool ReplacementContext::empty() {
 }
 
 Inst *ReplacementContext::getInst(llvm::StringRef Name) {
-  auto InstIt = NameToInst.find(Name);
+  auto InstIt = NameToInst.find(Name.str());
   return (InstIt == NameToInst.end()) ? 0 : InstIt->second;
 }
 
 void ReplacementContext::setInst(llvm::StringRef Name, Inst *I) {
-  NameToInst[Name] = I;
+  NameToInst[Name.str()] = I;
   InstNames[I] = Name;
 }
 
 Block *ReplacementContext::getBlock(llvm::StringRef Name) {
-  auto BlockIt = NameToBlock.find(Name);
+  auto BlockIt = NameToBlock.find(Name.str());
   return (BlockIt == NameToBlock.end()) ? 0 : BlockIt->second;
 }
 
 void ReplacementContext::setBlock(llvm::StringRef Name, Block *B) {
-  NameToBlock[Name] = B;
+  NameToBlock[Name.str()] = B;
   BlockNames[B] = Name;
 }
 
@@ -457,6 +457,8 @@ const char *Inst::getKindName(Kind K) {
   case SMulO:
   case UMulO:
     return "o";
+  case Freeze:
+    return "freeze";
   default:
     llvm_unreachable("all cases covered");
   }
@@ -526,6 +528,7 @@ Inst::Kind Inst::getKind(std::string Name) {
                    .Case("reservedinst", Inst::ReservedInst)
                    .Case("hole", Inst::Hole)
                    .Case("reservedconst", Inst::ReservedConst)
+                   .Case("freeze", Inst::Freeze)
                    .Default(Inst::None);
 }
 
@@ -874,7 +877,25 @@ Inst::Kind Inst::getBasicInstrForOverflow(Inst::Kind K) {
 }
 
 bool Inst::isShift(Inst::Kind K) {
-  return K == Inst::Shl || K == Inst::AShr || K == Inst::LShr;
+  return
+    K == Shl ||
+    K == ShlNSW ||
+    K == ShlNUW ||
+    K == ShlNW ||
+    K == LShr ||
+    K == LShrExact ||
+    K == AShr ||
+    K == AShrExact;
+}
+
+bool Inst::isDivRem(Inst::Kind K) {
+  return
+    K == UDiv ||
+    K == SDiv ||
+    K == UDivExact ||
+    K == SDivExact ||
+    K == URem ||
+    K == SRem;
 }
 
 int Inst::getCost(Inst::Kind K) {
@@ -882,19 +903,12 @@ int Inst::getCost(Inst::Kind K) {
     case Var:
     case Const:
     case UntypedConst:
-    case Phi:
     case SAddO:
     case UAddO:
     case SSubO:
     case USubO:
     case SMulO:
     case UMulO:
-    case SAddWithOverflow:
-    case UAddWithOverflow:
-    case SSubWithOverflow:
-    case USubWithOverflow:
-    case SMulWithOverflow:
-    case UMulWithOverflow:
       return 0;
     case BitReverse:
     case BSwap:
@@ -1052,18 +1066,15 @@ void souper::findCands(Inst *Root, std::vector<Inst *> &Guesses,
                bool WidthMustMatch, bool FilterVars, int Max) {
   // breadth-first search
   std::set<Inst *> Visited;
-  std::queue<std::tuple<Inst *,int>> Q;
-  Q.push(std::make_tuple(Root, 0));
+  std::queue<Inst *> Q;
+  Q.push(Root);
   while (!Q.empty()) {
-    Inst *I;
-    int Benefit;
-    std::tie(I, Benefit) = Q.front();
+    Inst *I = Q.front();
     Q.pop();
-    ++Benefit;
     if (Visited.insert(I).second) {
       for (auto Op : I->Ops)
-        Q.push(std::make_tuple(Op, Benefit));
-      if (Benefit > 1 && I->Available && I->K != Inst::Const
+        Q.push(Op);
+      if (I->Available && I->K != Inst::Const
           && I->K != Inst::UntypedConst) {
         if (WidthMustMatch && I->Width != Root->Width)
           continue;

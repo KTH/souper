@@ -189,6 +189,98 @@ namespace souper {
   public:
     InputVarInfo findDontCareBits(souper::Inst *Root);
   };
+
+  class HoleAnalysis {
+  public:
+    std::unordered_map<souper::Inst *, bool> Cache;
+    bool findIfHole(souper::Inst *I);
+  };
+
+  class ForcedValueAnalysis {
+  public:
+    ForcedValueAnalysis(Inst *RHS_) : RHS(RHS_), Conflict(false) {
+      countSymbolicInsts(RHS);
+    }
+    class Value {
+    public:
+      Value() : hasValue(false) {}
+      Value(llvm::APInt Val_) : hasValue(true), Val{Val_} {
+        KB.One = Val;
+        KB.Zero = ~Val;
+      }
+      Value(llvm::KnownBits KB_) : hasValue(false), KB(KB_) {
+        if (!KB.hasConflict() && KB.isConstant()) {
+          hasValue = true;
+          Val = KB.getConstant();
+        }
+      }
+      bool conflict(Value &Other) {
+        bool ValueConflict = hasConcrete() && Other.hasConcrete()
+                             && Concrete() != Other.Concrete();
+        bool KBConflict = ((KB.Zero & Other.KB.One)|
+                           (KB.One & Other.KB.Zero)) != 0;
+        return ValueConflict || KBConflict;
+      }
+      bool hasConcrete() {
+        return hasValue;
+      }
+      bool hasKB() {
+        return !KB.isUnknown();
+      }
+      llvm::APInt Concrete() {
+        assert(hasValue && "Must have value");
+        return Val;
+      }
+      llvm::KnownBits getKB() {
+        return KB;
+      }
+
+      template<typename Stream>
+      void print(Stream &Out) {
+        Out << "[";
+        if (hasValue) {
+          Out << Val << ", ";
+        }
+        if (hasKB()) {
+          Out << Inst::getKnownBitsString(KB.Zero, KB.One);
+        }
+        Out << "]\n";
+      }
+
+    private:
+      bool hasValue = false;
+      llvm::APInt Val;
+      llvm::KnownBits KB;
+      // Add ConstantRange maybe
+    };
+
+    std::unordered_map<souper::Inst *, std::vector<Value>> ForcedValues;
+
+    using Worklist = std::vector<std::pair<Inst *, Value>>;
+
+    // Returns true on conflict
+    bool force(llvm::APInt Result, ConcreteInterpreter &CI);
+
+    // Returns true on conflict
+    bool forceInst(souper::Inst *I, Value Result,
+                   ConcreteInterpreter &CI,
+                   Worklist &ToDo);
+
+    // Adds to the worklist
+    // Returns true on conflict
+    bool addForcedValue(Inst *I, Value V, Worklist &ToDo);
+
+    bool conflict() {
+      return Conflict;
+    }
+
+    // Counts uses, not defs.
+    void countSymbolicInsts(Inst *I);
+
+    Inst *RHS;
+    bool Conflict;
+  };
+
 }
 
 #endif

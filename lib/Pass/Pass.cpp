@@ -26,11 +26,13 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Transforms/Scalar/DCE.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
@@ -219,7 +221,7 @@ public:
     ScalarEvolution *SE = &getAnalysis<ScalarEvolutionWrapperPass>(*F).getSE();
     if (!SE)
       report_fatal_error("getSE() failed");
-    TargetLibraryInfo* TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+    TargetLibraryInfo* TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(*F);
     if (!TLI)
       report_fatal_error("getTLI() failed");
     FunctionCandidateSet CS = ExtractCandidatesFromPass(F, LI, DB, LVI, SE, TLI, IC, EBC);
@@ -269,12 +271,12 @@ public:
       }
       if (DynamicProfileAll) {
         dynamicProfile(F, Cand);
-        Changed = true;
         continue;
       }
+      std::vector<Inst *> RHSs;
       if (std::error_code EC =
           S->infer(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,
-                   Cand.Mapping.RHS, IC)) {
+                   RHSs, /*AllowMultipleRHSs=*/false, IC)) {
         if (EC == std::errc::timed_out ||
             EC == std::errc::value_too_large) {
           continue;
@@ -282,9 +284,10 @@ public:
           report_fatal_error("Unable to query solver: " + EC.message() + "\n");
         }
       }
-
-      if (!Cand.Mapping.RHS)
+      if (RHSs.empty())
         continue;
+
+      Cand.Mapping.RHS = RHSs.front();
 
       Instruction *I = Cand.Origin;
       assert(Cand.Mapping.LHS->hasOrigin(I));
@@ -318,6 +321,9 @@ public:
       }
 
       // here we finally commit to having a viable replacement
+
+      if (DebugLevel > 1)
+        errs() << "#########################################################\n";
 
       if (ReplacementIdx < FirstReplace || ReplacementIdx > LastReplace) {
         if (DebugLevel > 1)
@@ -369,7 +375,6 @@ public:
 
       if (Cand.Mapping.LHS->HarvestKind == HarvestType::HarvestedFromDef) {
         I->replaceAllUsesWith(NewVal);
-        Changed = true;
       } else {
         for (llvm::Value::use_iterator UI = I->use_begin();
              UI != I->use_end(); ) {
@@ -379,24 +384,30 @@ public:
           auto *Usr = dyn_cast<llvm::Instruction>(U.getUser());
           if (Usr && Usr->getParent() == Cand.Mapping.LHS->HarvestFrom) {
             U.set(NewVal);
-            Changed = true;
           }
         }
       }
-    }
 
-    if (DebugLevel > 2) {
-      if (DebugLevel > 4) {
-        errs() << "\nModule after replacement:\n";
-        F->getParent()->dump();
-      } else {
-        errs() << "\nFunction after replacement:\n\n";
-        F->print(errs());
+      eliminateDeadCode(*F, TLI);
+
+      if (DebugLevel > 2) {
+        if (DebugLevel > 4) {
+          errs() << "\nModule after replacement:\n";
+          F->getParent()->dump();
+        } else {
+          errs() << "\nFunction after replacement:\n\n";
+          F->print(errs());
+        }
+        errs() << "\n";
       }
-      errs() << "\n";
+
+      if (DebugLevel > 1)
+        errs() << "#########################################################\n";
+
+      return true;
     }
 
-    return Changed;
+    return false;
   }
 
   bool runOnModule(Module &M) {
@@ -405,17 +416,19 @@ public:
     std::vector<Function *> FL;
     for (auto &I : M)
       FL.push_back((Function *)&I);
-    for (auto *F : FL)
-      if (!F->isDeclaration())
-        Changed = runOnFunction(F) || Changed;
-    if (DebugLevel > 1) {      
+    for (auto *F : FL) {
+      if (F->isDeclaration())
+        continue;
+      while (runOnFunction(F)) {
+        Changed = true;
+        if (DebugLevel > 2)
+          errs() << "rescanning function after transformation was applied\n";
+      }
+    }
+    if (DebugLevel > 1){
       errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
-
-    if(CountValid)
-      errs() << "[" << nametext << "/" << TotalCandidates <<"]\n";
-
     return Changed;
   }
 

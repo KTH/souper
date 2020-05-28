@@ -28,6 +28,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/KnownBits.h"
 #include "souper/Inst/Inst.h"
@@ -262,6 +263,7 @@ Inst *ExprBuilder::buildConstant(Constant *c) {
   }
 }
 
+#if 0
 Inst *ExprBuilder::buildGEP(Inst *Ptr, gep_type_iterator begin,
                             gep_type_iterator end) {
   unsigned PSize = DL.getPointerSizeInBits();
@@ -289,6 +291,7 @@ Inst *ExprBuilder::buildGEP(Inst *Ptr, gep_type_iterator begin,
   }
   return Ptr;
 }
+#endif
 
 void ExprBuilder::markExternalUses (Inst *I) {
   std::map<Inst *, unsigned> UsesCount;
@@ -518,6 +521,9 @@ Inst *ExprBuilder::buildHelper(Value *V) {
       }
       return IC.getPhi(BI.B, Incomings);
     }
+  } else if (auto FI = dyn_cast<FreezeInst>(V)) {
+    Inst *Op0 = get(FI->getOperand(0));
+    return IC.getInst(Inst::Freeze, Op0->Width, {Op0});
   } else if (auto EV = dyn_cast<ExtractValueInst>(V)) {
     Inst *L = get(EV->getOperand(0));
     ArrayRef<unsigned> Idx = EV->getIndices();
@@ -542,6 +548,11 @@ Inst *ExprBuilder::buildHelper(Value *V) {
       }
     }
   } else if (auto Call = dyn_cast<CallInst>(V)) {
+    for (auto &&Arg : Call->args()) {
+      if (!Arg->getType()->isSized()) {
+        return makeArrayRead(V);
+      }
+    }
     LibFunc Func;
     if (auto II = dyn_cast<IntrinsicInst>(Call)) {
       Inst *L = get(II->getOperand(0));
@@ -1054,7 +1065,7 @@ public:
   }
 
   bool runOnFunction(Function &F) {
-    TargetLibraryInfo* TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+    TargetLibraryInfo* TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F);
     LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     if (!LI)
       report_fatal_error("getLoopInfo() failed");

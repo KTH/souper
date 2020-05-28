@@ -120,6 +120,7 @@ struct Inst : llvm::FoldingSetNode {
     UAddSat,
     SSubSat,
     USubSat,
+    Freeze,
 
     ReservedConst,
     ReservedInst,
@@ -167,6 +168,7 @@ struct Inst : llvm::FoldingSetNode {
 
   static bool isCommutative(Kind K);
   static bool isShift(Kind K);
+  static bool isDivRem(Kind K);
   static int getCost(Kind K);
   llvm::APInt KnownZeros;
   llvm::APInt KnownOnes;
@@ -181,6 +183,8 @@ struct Inst : llvm::FoldingSetNode {
   llvm::BasicBlock* HarvestFrom;
   llvm::ConstantRange Range=llvm::ConstantRange(1, true);
   std::vector<llvm::ConstantRange> RangeRefinement;
+  int nReservedConsts = -1;
+  int nHoles = -1;
 };
 
 /// A mapping from an Inst to a replacement. This may either represent a
@@ -273,6 +277,7 @@ struct SynthesisContext {
   Inst *LHSUB;
   const std::vector<InstMapping> &PCs;
   const BlockPCs &BPCs;
+  bool CheckAllGuesses;
   unsigned Timeout;
 };
 

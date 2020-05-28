@@ -212,21 +212,20 @@ std::map<souper::Inst *, llvm::APInt>
 performCegisFirstQuery(tools::Transform &t,
                        std::map<std::string, souper::Inst *> &SouperConsts,
                        smt::expr &TriedExpr) {
-  IR::Value::reset_gbl_id();
   IR::State SrcState(t.src, true);
   IR::State TgtState(t.tgt, false);
   util::sym_exec(SrcState);
   util::sym_exec(TgtState);
 
-  auto &Sv = SrcState.returnVal();
-  auto &Tv = TgtState.returnVal();
+  auto &&Sv = SrcState.returnVal();
+  auto &&Tv = TgtState.returnVal();
 
   std::map<souper::Inst *, llvm::APInt> SynthesisResult;
   SynthesisResult.clear();
 
   std::set<smt::expr> Vars;
   std::map<std::string, smt::expr> SMTConsts;
-  for (auto &[Var, Val] : TgtState.getValues()) {
+  for (auto &[Var, Val, Pred] : TgtState.getValues()) {
     auto &Name = Var->getName();
     if (startsWith("%reservedconst", Name)) {
       SMTConsts[Name] = Val.first.value;
@@ -266,15 +265,14 @@ synthesizeConstantUsingSolver(tools::Transform &t,
   std::map<std::string, souper::Inst *> &SouperConsts) {
   return {};
 
-  IR::Value::reset_gbl_id();
   IR::State SrcState(t.src, true), tgt_state(t.tgt, false);
   util::sym_exec(SrcState);
   util::sym_exec(tgt_state);
 
   util::Errors Errs;
 
-  auto &SrcRet = SrcState.returnVal();
-  auto &TgtRet = tgt_state.returnVal();
+  auto &&SrcRet = SrcState.returnVal();
+  auto &&TgtRet = tgt_state.returnVal();
 
   auto QVars = SrcState.getQuantVars();
   QVars.insert(SrcRet.second.begin(), SrcRet.second.end());
@@ -292,7 +290,7 @@ synthesizeConstantUsingSolver(tools::Transform &t,
   std::set<smt::expr> Vars;
   std::map<std::string, smt::expr> SMTConsts;
 
-  for (auto &[var, val] : SrcState.getValues()) {
+  for (auto &[var, val, Pred] : SrcState.getValues()) {
     auto &name = var->getName();
     if (startsWith("%var", name)) {
       auto app = val.first.value.isApp();
@@ -300,7 +298,7 @@ synthesizeConstantUsingSolver(tools::Transform &t,
       Vars.insert(Z3_get_app_arg(smt::ctx(), app, 1));
     }
   }
-  for (auto &[var, val] : tgt_state.getValues()) {
+  for (auto &[var, val, Pred] : tgt_state.getValues()) {
     auto &name = var->getName();
     if (startsWith("%reserved", name)) {
       auto app = val.first.value.isApp();
@@ -336,16 +334,20 @@ synthesizeConstantUsingSolver(tools::Transform &t,
 
 souper::AliveDriver::AliveDriver(Inst *LHS_, Inst *PreCondition_, InstContext &IC_)
     : LHS(LHS_), PreCondition(PreCondition_), IC(IC_) {
+  IsLHS = true;
   InstNumbers = 101;
   //FIXME: Magic number. 101 is chosen arbitrarily.
   //This should go away once non-input variable names are not discarded
 
   if (!translateRoot(LHS, PreCondition, LHSF, LExprCache)) {
+    ReplacementContext RC;
+    RC.printInst(LHS, llvm::outs(), true);
     llvm::report_fatal_error("Failed to translate LHS.\n");
   }
   if (DisableUndefInput) {
     util::config::disable_undef_input = true;
   }
+  IsLHS = false;
 }
 
 //TODO: Return an APInt when alive supports it
@@ -379,7 +381,6 @@ souper::AliveDriver::synthesizeConstants(souper::Inst *RHS) {
 std::map<souper::Inst *, llvm::APInt>
 souper::AliveDriver::synthesizeConstantsWithCegis(souper::Inst *RHS, InstContext &IC) {
   std::map<souper::Inst *, llvm::APInt> ConstMap;
-
   std::map<std::string, Inst *> Consts;
   std::set<Inst *> Visited;
   getReservedConsts(RHS, Consts, Visited);
@@ -389,7 +390,7 @@ souper::AliveDriver::synthesizeConstantsWithCegis(souper::Inst *RHS, InstContext
 
   RExprCache.clear();
   IR::Function RHSF;
-  if (!translateRoot(RHS, nullptr, RHSF, RExprCache)) {
+  if (!translateRoot(RHS, PreCondition, RHSF, RExprCache)) {
     if (DebugLevel > 2)
       llvm::errs() << "Failed to translate RHS.\n";
     // TODO: Eventually turn this into an assertion
@@ -429,7 +430,7 @@ souper::AliveDriver::synthesizeConstantsWithCegis(souper::Inst *RHS, InstContext
 
     // Second Query
     {
-      if (verify(GWithC)) {
+      if (verify(GWithC, PreCondition)) {
         break;
       } else {
         continue;
@@ -439,10 +440,9 @@ souper::AliveDriver::synthesizeConstantsWithCegis(souper::Inst *RHS, InstContext
   return ConstMap;
 }
 
-void souper::AliveDriver::copyInputs(souper::AliveDriver::Cache &From,
-                                     souper::AliveDriver::Cache &To,
+void souper::AliveDriver::copyInputs(souper::AliveDriver::Cache &To,
                                      IR::Function &RHS) {
-  for (auto &[I, Val] : From) {
+  for (auto &[I, Val] : Inputs) {
     if (I->K == Inst::Kind::Var) {
       auto Input = std::make_unique<IR::Input>(Val->getType(),
                                                std::string(NameMap[I]));
@@ -455,7 +455,7 @@ void souper::AliveDriver::copyInputs(souper::AliveDriver::Cache &From,
 bool souper::AliveDriver::verify (Inst *RHS, Inst *RHSAssumptions) {
   RExprCache.clear();
   IR::Function RHSF;
-  copyInputs(LExprCache, RExprCache, RHSF);
+  copyInputs(RExprCache, RHSF);
   if (!translateRoot(RHS, RHSAssumptions, RHSF, RExprCache)) {
     llvm::errs() << "Failed to translate RHS.\n";
     // TODO: Eventually turn this into an assertion
@@ -476,9 +476,11 @@ bool souper::AliveDriver::verify (Inst *RHS, Inst *RHSAssumptions) {
   tools::TransformVerify tv(t, /*check_each_var=*/false);
 
   if (auto errs = tv.verify()) {
-    std::ostringstream os;
-    os << errs << "\n";
-    llvm::errs() << os.str();
+    if (DebugLevel >= 1) {
+      std::ostringstream os;
+      os << errs << "\n";
+      llvm::errs() << os.str();
+    }
     return false; // TODO: Encode errs into ErrorCode
   } else {
     if (DebugLevel > 2)
@@ -497,7 +499,9 @@ bool souper::AliveDriver::translateRoot(const souper::Inst *I, const Inst *PC,
   }
   FunctionBuilder Builder(F);
   if (PC) {
-    Builder.assume(ExprCache[PC]);
+    auto Zero = Builder.val(getType(I->Width), llvm::APInt(I->Width, 0));
+    ExprCache[I] = Builder.select(getType(I->Width), "%ifpc",
+                   ExprCache[PC], ExprCache[I], Zero);
   }
   Builder.ret(getType(I->Width), ExprCache[I]);
   F.setType(getType(I->Width));
@@ -583,6 +587,9 @@ bool souper::AliveDriver::translateAndCache(const souper::Inst *I,
   switch (I->K) {
     case souper::Inst::Var: {
       ExprCache[I] = Builder.var(t, Name);
+      if (IsLHS) {
+        Inputs.push_back({I, ExprCache[I]});
+      }
       return translateDataflowFacts(I, F, ExprCache);
     }
     case souper::Inst::Hole: {
@@ -603,10 +610,24 @@ bool souper::AliveDriver::translateAndCache(const souper::Inst *I,
       return true;
     }
 
+    case souper::Inst::Phi: {
+      if (I->Ops.size() != 1) {
+        assert(false && "Phi with muliple arguments unimplemented");
+        return false;
+      }
+      ExprCache[I] = ExprCache[I->Ops[0]];
+      return true;
+    }
+
     case souper::Inst::ExtractValue: {
       unsigned idx = I->Ops[1]->Val.getLimitedValue();
       assert(idx <= 1 && "Only extractvalue with overflow instructions are supported.");
       ExprCache[I] = Builder.extractvalue(t, Name, ExprCache[I->Ops[0]], idx);
+      return true;
+    }
+
+    case souper::Inst::Freeze: {
+      ExprCache[I] = Builder.freeze(t, Name, ExprCache[I->Ops[0]]);
       return true;
     }
 
@@ -637,22 +658,22 @@ bool souper::AliveDriver::translateAndCache(const souper::Inst *I,
     BINOP(Add, Add);
     BINOPF(AddNSW, Add, NSW);
     BINOPF(AddNUW, Add, NUW);
-    BINOPF(AddNW, Add, NSWNUW);
+    BINOPF(AddNW, Add, NSW | IR::BinOp::NUW); //FIXME(manasij) : Leaky abstraction
     BINOP(Sub, Sub);
     BINOPF(SubNSW, Sub, NSW);
     BINOPF(SubNUW, Sub, NUW);
-    BINOPF(SubNW, Sub, NSWNUW);
+    BINOPF(SubNW, Sub, NSW | IR::BinOp::NUW);
     BINOP(Mul, Mul);
     BINOPF(MulNSW, Mul, NSW);
     BINOPF(MulNUW, Mul, NUW);
-    BINOPF(MulNW, Mul, NSWNUW);
+    BINOPF(MulNW, Mul, NSW | IR::BinOp::NUW);
     BINOP(And, And);
     BINOP(Or, Or);
     BINOP(Xor, Xor);
     BINOP(Shl, Shl);
     BINOPF(ShlNSW, Shl, NSW);
     BINOPF(ShlNUW, Shl, NUW);
-    BINOPF(ShlNW, Shl, NSWNUW);
+    BINOPF(ShlNW, Shl, NSW | IR::BinOp::NUW);
     BINOP(LShr, LShr);
     BINOPF(LShrExact, LShr, Exact);
     BINOP(AShr, AShr);
@@ -759,7 +780,7 @@ bool souper::isTransformationValid(souper::Inst* LHS, souper::Inst* RHS,
     Ante = IC.getInst(Inst::And, 1, {Ante, Eq});
   }
   AliveDriver Verifier(LHS, Ante, IC);
-  return Verifier.verify(RHS);
+  return Verifier.verify(RHS, Ante);
 }
 
 

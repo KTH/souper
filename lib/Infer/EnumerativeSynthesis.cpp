@@ -22,10 +22,14 @@
 
 #include <queue>
 #include <functional>
+#include <set>
 
 static const unsigned MaxTries = 20000;
 static const unsigned MaxInputSpecializationTries = 40;
 static const unsigned MaxLHSCands = 200000;
+
+// static const unsigned MaxTries = 30;
+// static const unsigned MaxInputSpecializationTries = 2;
 
 bool UseAlive;
 unsigned DebugLevel;
@@ -34,7 +38,7 @@ using namespace souper;
 using namespace llvm;
 
 static const std::vector<Inst::Kind> UnaryOperators = {
-  Inst::CtPop, Inst::BSwap, Inst::BitReverse, Inst::Cttz, Inst::Ctlz
+  Inst::CtPop, Inst::BSwap, Inst::BitReverse, Inst::Cttz, Inst::Ctlz, Inst::Freeze
 };
 
 static const std::vector<Inst::Kind> BinaryOperators = {
@@ -100,6 +104,9 @@ namespace {
   static cl::opt<bool> IgnoreCost("souper-enumerative-synthesis-ignore-cost",
     cl::desc("Ignore cost of RHSes -- just generate them. (default=false)"),
     cl::init(false));
+  static cl::opt<unsigned> MaxLHSCands("souper-max-lhs-cands",
+    cl::desc("Gather at most this many inputs from a LHS to use as synthesis inputs (default=8)"),
+    cl::init(8));
 }
 
 // TODO
@@ -150,8 +157,6 @@ void addGuess(Inst *RHS, unsigned TargetWidth, InstContext &IC, int MaxCost, std
       TooExpensive++;
   }
 }
-
-typedef std::function<bool(Inst *, std::vector<Inst *> &)> PruneFunc;
 
 // Does a short-circuiting AND operation
 PruneFunc MkPruneFunc(std::vector<PruneFunc> Funcs) {
@@ -206,6 +211,10 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
     unaryExclList.push_back(Inst::BitReverse);
   }
 
+  // disable generating freeze of freeze
+  if (unaryHoleUsers.size() == 1 && unaryHoleUsers[0]->K == Inst::Freeze)
+    unaryExclList.push_back(Inst::Freeze);
+
   std::vector<Inst *> PartialGuesses;
 
   std::vector<Inst *> Comps(Inputs.begin(), Inputs.end());
@@ -222,32 +231,33 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
   Comps.push_back(I1);
 
   // Unary Operators
-  if (Width > 1) {
-    for (auto K : UnaryOperators) {
-      for (auto Comp : Comps) {
-        if (std::find(unaryExclList.begin(), unaryExclList.end(), K) != unaryExclList.end())
-          continue;
+  for (auto K : UnaryOperators) {
+    if (std::find(unaryExclList.begin(), unaryExclList.end(), K) != unaryExclList.end())
+      continue;
 
-        if (K == Inst::BSwap && Width % 16 != 0)
-          continue;
+    if (K != Inst::Freeze && Width <= 1)
+      continue;
 
-        if (Comp->K == Inst::ReservedInst) {
-          auto V = IC.createHole(Width);
-          auto N = IC.getInst(K, Width, { V });
-          addGuess(N, Width, IC, LHSCost, PartialGuesses, TooExpensive);
-          continue;
-        }
+    for (auto Comp : Comps) {
+      if (K == Inst::BSwap && Width % 16 != 0)
+        continue;
 
-        if (Comp->Width != Width)
-          continue;
-
-        // Prune: unary operation on constant
-        if (Comp->K == Inst::ReservedConst)
-          continue;
-
-        auto N = IC.getInst(K, Width, { Comp });
+      if (Comp->K == Inst::ReservedInst) {
+        auto V = IC.createHole(Width);
+        auto N = IC.getInst(K, Width, { V });
         addGuess(N, Width, IC, LHSCost, PartialGuesses, TooExpensive);
+        continue;
       }
+
+      if (Comp->Width != Width)
+        continue;
+
+      // Prune: unary operation on constant
+      if (Comp->K == Inst::ReservedConst)
+        continue;
+
+      auto N = IC.getInst(K, Width, { Comp });
+      addGuess(N, Width, IC, LHSCost, PartialGuesses, TooExpensive);
     }
   }
 
@@ -258,14 +268,28 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
   Comps.push_back(I2);
 
   for (auto K : BinaryOperators) {
-    // PRUNE: one-bit shifts don't make sense
-    if (Inst::isShift(K) && Width == 1)
+
+    // PRUNE: i1 is a special case for a number of operators
+    if (Width == 1 &&
+        (// these become trivial
+         Inst::isDivRem(K) || Inst::isShift(K) ||
+         // these canonicalize to "xor"
+         K == Inst::Add || K == Inst::Sub || K == Inst::Ne ||
+         // canonicalizes to "and"
+         K == Inst::Mul ||
+         // i1 versions of these do not tend to codegen well
+         K == Inst::SAddSat || K == Inst::UAddSat ||
+         K == Inst::SSubSat || K == Inst::USubSat ||
+         K == Inst::SAddWithOverflow || K == Inst::UAddWithOverflow ||
+         K == Inst::SSubWithOverflow || K == Inst::USubWithOverflow ||
+         K == Inst::SMulWithOverflow || K == Inst::UMulWithOverflow)) {
       continue;
+    }
 
     for (auto I = Comps.begin(); I != Comps.end(); ++I) {
       // Prune: only one of (mul x, C), (mul C, x) is allowed
-      if ((Inst::isCommutative(K) || Inst::isOverflowIntrinsicMain(K) || Inst::isOverflowIntrinsicSub(K)) &&
-          (*I)->K == Inst::ReservedConst)
+      if ((Inst::isCommutative(K) || Inst::isOverflowIntrinsicMain(K) ||
+           Inst::isOverflowIntrinsicSub(K)) && (*I)->K == Inst::ReservedConst)
         continue;
 
       // Prune: I1 should only be the first argument
@@ -359,7 +383,7 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
           continue;
 
         // PRUNE: don't synthesize sub x, C since this is covered by add x, -C
-        if (K == Inst::Sub && V2->SynthesisConstID != 0)
+        if (K == Inst::Sub && V2->K == Inst::Var && V2->SynthesisConstID != 0)
           continue;
 
         Inst *N = nullptr;
@@ -370,7 +394,8 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
           N = IC.getInst(Inst::ExtractValue, V1->Width, {Orig, IC.getConst(llvm::APInt(32, 0))});
         }
         else if (Inst::isOverflowIntrinsicSub(K)) {
-          auto Comp0 = IC.getInst(Inst::getBasicInstrForOverflow(Inst::getOverflowComplement(K)), V1->Width, {V1, V2});
+          auto Comp0 = IC.getInst(Inst::getBasicInstrForOverflow(Inst::getOverflowComplement(K)),
+                                  V1->Width, {V1, V2});
           auto Comp1 = IC.getInst(K, 1, {V1, V2});
           auto Orig = IC.getInst(Inst::getOverflowComplement(K), V1->Width + 1, {Comp0, Comp1});
           N = IC.getInst(Inst::ExtractValue, 1, {Orig, IC.getConst(llvm::APInt(32, 1))});
@@ -403,6 +428,10 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
       // (select c, x, y)
       // PRUNE: a select's control input should never be constant
       if (Op == Inst::Select && I->K == Inst::ReservedConst)
+        continue;
+
+      // PRUNE: don't generate an i1 using funnel shift
+      if (Width == 1 && (Op == Inst::FShr || Op == Inst::FShl))
         continue;
 
       Inst *V1;
@@ -444,7 +473,8 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
             continue;
 
           // PRUNE: ter-op c, c, c
-          if (I->K == Inst::ReservedConst && J->K == Inst::ReservedConst && K->K == Inst::ReservedConst)
+          if (I->K == Inst::ReservedConst && J->K == Inst::ReservedConst &&
+              K->K == Inst::ReservedConst)
             continue;
 
           // PRUNE: (select cond, x, x)
@@ -507,12 +537,11 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
     // if there exist empty slots, then call getGuesses() recursively
     // and fill the empty slots
     if (prune(JoinedGuess, CurrSlots)) {
-      for (auto S : CurrSlots) {
-        if (!getGuesses(Inputs, S->Width,
-                        LHSCost, IC, JoinedGuess,
-                        S, TooExpensive, prune, Generate)) {
-          return false;
-        }
+      // TODO: replace this naive hole selection with some better algorithms
+      if (!getGuesses(Inputs, CurrSlots.front()->Width,
+                      LHSCost, IC, JoinedGuess,
+                      CurrSlots.front(), TooExpensive, prune, Generate)) {
+        return false;
       }
     }
   }
@@ -574,7 +603,7 @@ bool canDifferInLSB(SynthesisContext &SC, Inst *RHSGuess) {
   return QueryIsSat;
 }
 
-std::error_code synthesizeWithAlive(SynthesisContext &SC, Inst *&RHS,
+std::error_code synthesizeWithAlive(SynthesisContext &SC, std::vector<Inst *> &RHSs,
                                     const std::vector<souper::Inst *> &Guesses) {
   std::error_code EC;
   std::map<Inst *, Inst *> InstCache;
@@ -590,13 +619,15 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, Inst *&RHS,
   }
 
   AliveDriver Verifier(SC.LHS, Ante, SC.IC);
+  Inst *RHS;
   for (auto &&G : Guesses) {
     std::set<const Inst *> Visited;
     auto C = findConst(G, Visited);
     if (!C) {
       if (Verifier.verify(G)) {
         RHS = G;
-        return EC;
+      } else {
+        continue;
       }
     } else {
       if (SynthesisConstWithCegisLoop) {
@@ -606,7 +637,6 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, Inst *&RHS,
         auto GWithC = getInstCopy(G, SC.IC, InstCache, BlockCache, &ConstMap,
                                   /*CloneVars=*/false);
         RHS = GWithC;
-        return EC;
       } else {
         auto ConstMap = Verifier.synthesizeConstants(G);
         // TODO: Counterexample guided loop or UB constraints in query
@@ -615,12 +645,21 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, Inst *&RHS,
                                   /*CloneVars=*/false);
         if (Verifier.verify(GWithC)) {
           RHS = GWithC;
-          return EC;
         } else {
           continue;
         }
-        return EC;
       }
+    }
+    assert (RHS);
+    RHSs.emplace_back(RHS);
+    if (!SC.CheckAllGuesses) {
+      return EC;
+    }
+    if (DebugLevel > 3) {
+      llvm::outs() << "; result " << RHSs.size() << ":\n";
+      ReplacementContext RC;
+      RC.printInst(RHS, llvm::outs(), false);
+      llvm::outs() << "\n";
     }
   }
   return EC;
@@ -692,7 +731,7 @@ bool isBigQuerySat(SynthesisContext &SC,
   return BigQueryIsSat;
 }
 
-std::error_code synthesizeWithKLEE(SynthesisContext &SC, Inst *&RHS,
+std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RHSs,
                                    const std::vector<souper::Inst *> &Guesses) {
   std::error_code EC;
 
@@ -702,6 +741,7 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, Inst *&RHS,
 
   // find the valid one
   int GuessIndex = -1;
+  Inst *RHS;
 
   for (auto I : Guesses) {
     GuessIndex++;
@@ -731,7 +771,6 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, Inst *&RHS,
         if (DebugLevel > 3)
           llvm::errs() << "query is UNSAT\n";
         RHS = I;
-        return EC;
       }
     } else {
       // guess has constant
@@ -740,56 +779,62 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, Inst *&RHS,
       std::map <Inst *, llvm::APInt> ResultConstMap;
 
       EC = CS.synthesize(SC.SMTSolver, SC.BPCs, SC.PCs, InstMapping (SC.LHS, I), ConstSet,
-                         ResultConstMap, SC.IC, /*MaxTries=*/MaxTries, SC.Timeout);
+                         ResultConstMap, SC.IC, /*MaxTries=*/MaxTries, SC.Timeout,
+                         /*AvoidNops=*/true);
       if (!ResultConstMap.empty()) {
         std::map<Inst *, Inst *> InstCache;
         std::map<Block *, Block *> BlockCache;
         RHS = getInstCopy(I, SC.IC, InstCache, BlockCache, &ResultConstMap, false);
-        return EC;
       } else {
         continue;
+      }
+    }
+
+    if (DoubleCheckWithAlive) {
+      if (!isTransformationValid(SC.LHS, RHS, SC.PCs, SC.IC)) {
+        llvm::errs() << "Transformation proved wrong by alive.\n";
+        ReplacementContext RC;
+        auto str = RC.printInst(SC.LHS, llvm::errs(), /*printNames=*/true);
+        llvm::errs() << "infer " << str << "\n";
+        str = RC.printInst(RHS, llvm::errs(), /*printNames=*/true);
+        llvm::errs() << "result " << str << "\n";
+        RHS = nullptr;
+      }
+    }
+    if (RHS) {
+      RHSs.emplace_back(RHS);
+      if (!SC.CheckAllGuesses) {
+        return EC;
+      }
+      if (DebugLevel > 3) {
+        llvm::outs() << "; result " << RHSs.size() << ":\n";
+        ReplacementContext RC;
+        RC.printInst(RHS, llvm::outs(), true);
+        llvm::outs() << "\n";
       }
     }
   }
   return EC;
 }
 
-std::error_code verify(SynthesisContext &SC, Inst *&RHS,
+std::error_code verify(SynthesisContext &SC, std::vector<Inst *> &RHSs,
                        const std::vector<souper::Inst *> &Guesses) {
   std::error_code EC;
   if (SkipSolver || Guesses.empty())
     return EC;
 
-  if (UseAlive) {
-    return synthesizeWithAlive(SC, RHS, Guesses);
-  } else {
-    auto Ret = synthesizeWithKLEE(SC, RHS, Guesses);
-    if (DoubleCheckWithAlive && !Ret && RHS) {
-      if (isTransformationValid(SC.LHS, RHS, SC.PCs, SC.IC)) {
-        return Ret;
-      } else {
-        llvm::errs() << "Transformation proved wrong by alive.";
-        ReplacementContext RC;
-        RC.printInst(SC.LHS, llvm::errs(), /*printNames=*/true);
-        llvm::errs() << "=>";
-        ReplacementContext RC2;
-        RC2.printInst(RHS, llvm::errs(), /*printNames=*/true);
-        RHS = nullptr;
-        std::error_code EC;
-        return EC;
-      }
-    }
-    return Ret;
-  }
+  return UseAlive ? synthesizeWithAlive(SC, RHSs, Guesses) :
+                    synthesizeWithKLEE(SC, RHSs, Guesses);
 }
 
 std::error_code
 EnumerativeSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                                 const BlockPCs &BPCs,
                                 const std::vector<InstMapping> &PCs,
-                                Inst *LHS, Inst *&RHS,
-                                InstContext &IC, unsigned Timeout) {
-  SynthesisContext SC{IC, SMTSolver, LHS, getUBInstCondition(SC.IC, SC.LHS), PCs, BPCs, Timeout};
+                                Inst *LHS, std::vector<Inst *> &RHSs,
+                                bool CheckAllGuesses, InstContext &IC, unsigned Timeout) {
+  SynthesisContext SC{IC, SMTSolver, LHS, getUBInstCondition(SC.IC, SC.LHS),
+                      PCs, BPCs, CheckAllGuesses, Timeout};
   std::error_code EC;
   std::vector<Inst *> Cands;
   findCands(SC.LHS, Cands, /*WidthMustMatch=*/false, /*FilterVars=*/false, MaxLHSCands);
@@ -820,35 +865,51 @@ EnumerativeSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   std::vector<Inst *> Guesses;
   uint64_t GuessCount = 0;
 
-  auto Generate = [&SC, &Guesses, &RHS, &EC, &GuessCount](Inst *Guess) {
+  auto Generate = [&SC, &Guesses, &RHSs, &EC, &GuessCount](Inst *Guess) {
     GuessCount++;
     Guesses.push_back(Guess);
     if (Guesses.size() >= MaxV && !SkipSolver) {
       sortGuesses(Guesses);
-      EC = verify(SC, RHS, Guesses);
+      EC = verify(SC, RHSs, Guesses);
       Guesses.clear();
-      return RHS == nullptr; // Continue if no RHS
+      return SC.CheckAllGuesses || (!SC.CheckAllGuesses && RHSs.empty()); // Continue if no RHS
     }
     return true;
   };
 
   // add nops guesses separately
   for (auto I : Cands) {
-    addGuess(I, SC.LHS->Width, SC.IC, LHSCost, Guesses, TooExpensive);
+    if (I->Width == SC.LHS->Width) {
+      addGuess(I, SC.LHS->Width, SC.IC, LHSCost, Guesses, TooExpensive);
+    }
   }
 
   getGuesses(Cands, SC.LHS->Width,
              LHSCost, SC.IC, nullptr, nullptr, TooExpensive, PruneCallback, Generate);
 
   if (!Guesses.empty() && !SkipSolver) {
-    EC = verify(SC, RHS, Guesses);
+    sortGuesses(Guesses);
+    EC = verify(SC, RHSs, Guesses);
   }
 
   if (DebugLevel >= 1) {
     DataflowPruning.printStats(llvm::errs());
   }
 
+  // Guesses count
   if (DebugLevel > 1)
     llvm::errs() << "There are " << GuessCount << " Guesses\n";
+
+  // RHSs count, before duplication
+  if (DebugLevel > 3)
+    llvm::errs() << "There are " << RHSs.size() << " RHSs before deduplication\n";
+
+  std::set<Inst *> Dedup(RHSs.begin(), RHSs.end());
+  RHSs.assign(Dedup.begin(), Dedup.end());
+
+  // RHSs count, after duplication
+  if (DebugLevel > 3)
+    llvm::errs() << "There are " << RHSs.size() << " RHSs after deduplication\n";
+
   return EC;
 }

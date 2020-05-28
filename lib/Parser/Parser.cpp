@@ -171,7 +171,7 @@ FoundChar:
       ++Begin;
     } while (Begin != End && ((*Begin >= 'a' && *Begin <= 'z') ||
              (*Begin == '.') || (*Begin >= 'A' && *Begin <= 'Z')));
-    std::string DataFlowFact = StringRef(TokenBegin, Begin - TokenBegin);
+    std::string DataFlowFact = StringRef(TokenBegin, Begin - TokenBegin).str();
     if (DataFlowFact == "knownBits") {
       if (*Begin != '=') {
         ErrStr = "expected '=' for knownBits";
@@ -186,7 +186,7 @@ FoundChar:
         return Token{Token::Error, Begin, 0, APInt()};
       }
       return Token{Token::KnownBits, TokenBegin, size_t(Begin - TokenBegin), APInt(),
-                   "", 0, StringRef(PatternBegin, Begin - PatternBegin)};
+                   "", 0, StringRef(PatternBegin, Begin - PatternBegin).str()};
     } else
       return Token{Token::Ident, TokenBegin, size_t(Begin - TokenBegin), APInt()};
   }
@@ -590,6 +590,7 @@ bool Parser::typeCheckInst(Inst::Kind IK, unsigned &Width,
   case Inst::BitReverse:
   case Inst::Cttz:
   case Inst::Ctlz:
+  case Inst::Freeze:
     MaxOps = MinOps = 1;
     break;
   case Inst::FShl:
@@ -806,7 +807,7 @@ bool Parser::parseInstAttribute(std::string &ErrStr, Inst *LHS) {
         ErrStr = makeErrStr("demandedBits pattern must be of same length as infer operand width");
         return false;
       }
-      std::string DemandedBitsPattern = CurTok.str();
+      std::string DemandedBitsPattern = CurTok.str().str();
       for (unsigned i = 0; i < LHS->Width; ++i) {
         if (DemandedBitsPattern[i] == '1') {
           DemandedBitsVal += ConstOne.shl(DemandedBitsPattern.length() - 1 - i);
@@ -1035,7 +1036,7 @@ bool Parser::parseLine(std::string &ErrStr) {
         return false;
       }
 
-      Inst::Kind IK = Inst::getKind(CurTok.str());
+      Inst::Kind IK = Inst::getKind(CurTok.str().str());
 
       if (IK == Inst::None) {
         if (CurTok.str() == "block") {
@@ -1074,7 +1075,7 @@ bool Parser::parseLine(std::string &ErrStr) {
 
       Block *B = 0;
 
-      if (IK == Inst::Var || IK == Inst::ReservedConst) {
+      if (IK == Inst::Var || IK == Inst::ReservedConst || IK == Inst::ReservedInst) {
         llvm::APInt Zero(InstWidth, 0, false), One(InstWidth, 0, false),
                     ConstOne(InstWidth, 1, false), Lower(InstWidth, 0, false),
                     Upper(InstWidth, 0, false);
@@ -1240,6 +1241,10 @@ bool Parser::parseLine(std::string &ErrStr) {
           I = IC.createVar(InstWidth, InstName, Range, Zero, One, NonZero,
                            NonNegative, PowOfTwo, Negative, SignBits,
                            ++ReservedConstCounter);
+        else if (IK == Inst::ReservedInst) {
+          I = IC.createHole(InstWidth);
+          I->Name = InstName;
+        }
 
         Context.setInst(InstName, I);
         return true;

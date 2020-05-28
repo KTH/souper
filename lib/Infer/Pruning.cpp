@@ -12,10 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "llvm/Support/CommandLine.h"
 #include "souper/Infer/AbstractInterpreter.h"
 #include "souper/Infer/Pruning.h"
 #include "souper/Extractor/Candidates.h"
 #include <cstdlib>
+
+namespace {
+  static llvm::cl::opt<bool> EnableHeavyDataflowPruning("souper-dataflow-pruning-heavy",
+    llvm::cl::desc("Enable all pruning techniques (default=false)"),
+    llvm::cl::init(false));
+
+  static llvm::cl::opt<bool> AbstractInterpretPhi("souper-dataflow-ai-phi",
+    llvm::cl::desc("Abstract interpret Phi instead of assuming first argument (default=false)"),
+    llvm::cl::init(false));
+
+  static llvm::cl::opt<bool> EnableKB("souper-dataflow-pruning-kb",
+    llvm::cl::desc("Prune with known-bits analysis (default=true)"),
+    llvm::cl::init(true));
+
+  static llvm::cl::opt<bool> EnableCR("souper-dataflow-pruning-cr",
+    llvm::cl::desc("Prune with integer-ranges analysis (default=true)"),
+    llvm::cl::init(true));
+
+  static llvm::cl::opt<bool> EnableFB("souper-dataflow-pruning-fb",
+    llvm::cl::desc("Prune with forced-bits analysis (default=true)"),
+    llvm::cl::init(true));
+
+  static llvm::cl::opt<bool> EnableRB("souper-dataflow-pruning-rb",
+    llvm::cl::desc("Prune with required-bits analysis (default=true)"),
+    llvm::cl::init(true));
+
+  static llvm::cl::opt<bool> EnableBB("souper-dataflow-pruning-bb",
+    llvm::cl::desc("Prune with bivalent-bits analysis (default=true)"),
+    llvm::cl::init(true));
+}
 
 namespace souper {
 
@@ -122,8 +153,10 @@ std::pair<llvm::APInt, llvm::APInt> knownBitsNarrowing
 // TODO : Comment out debug stmts and conditions before benchmarking
 bool PruningManager::isInfeasible(souper::Inst *RHS,
                                  unsigned StatsLevel) {
-  bool HasHole = !isConcrete(RHS, false, true);
-  bool RHSIsConcrete = isConcrete(RHS);
+  std::unordered_map<Inst *, ExprInfo> RHSInfo = LHSInfo;
+  ExprInfo::analyze(RHS, RHSInfo);
+  bool HasHole = RHSInfo[RHS].HasHole;
+  bool RHSIsConcrete = !RHSInfo[RHS].HasHole && !RHSInfo[RHS].HasConst;
 
   std::map<Inst *, std::vector<llvm::ConstantRange>> ConstantLimits;
   std::map<Inst *, llvm::APInt> ConstantKnownNotZero;
@@ -132,7 +165,13 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
   std::set<souper::Inst *> Constants;
   getConstants(RHS, Constants);
 
-  if (!Constants.empty()) {
+  if (HA.findIfHole(RHS)) {
+    // Do not attempt pruning if the RHS will provably produce top
+    // for all abstract interpreters
+    return false;
+  }
+
+  if (EnableBB && !Constants.empty()) {
     auto RestrictedBits = RestrictedBitsAnalysis().findRestrictedBits(RHS);
     if ((~RestrictedBits & (LHSKnownBitsNoSpec.Zero | LHSKnownBitsNoSpec.One)) != 0) {
 //     if (RestrictedBits == 0 && (LHSKB.Zero != 0 || LHSKB.One != 0)) {
@@ -157,23 +196,24 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
 //       }
 //       return true;
 //     }
+    if (EnableHeavyDataflowPruning) {
+      for (auto C : Constants) {
+        auto CutOff = 0xFFFFFF;
+        ConstantLimits[C].push_back(mkCR(C, 1, CutOff));
+        ConstantLimits[C].push_back(mkCR(C, 0, CutOff).inverse());
+        // ^ Initialize with full-set instead of this when we can gracefully deal with wrapped ranges
 
-    for (auto C : Constants) {
-      auto CutOff = 0xFFFFFF;
-      ConstantLimits[C].push_back(mkCR(C, 1, CutOff));
-      ConstantLimits[C].push_back(mkCR(C, 0, CutOff).inverse());
-      // ^ Initialize with full-set instead of this when we can gracefully deal with wrapped ranges
-
-      ConstantKnownNotOne[C] = llvm::APInt(C->Width, 0);
-      ConstantKnownNotZero[C] = llvm::APInt(C->Width, 0);
+        ConstantKnownNotOne[C] = llvm::APInt(C->Width, 0);
+        ConstantKnownNotZero[C] = llvm::APInt(C->Width, 0);
+      }
     }
   }
 
-  if (!HasHole) {
+  if (!HasHole && EnableDemandedBitsPruning && EnableRB) {
     auto DontCareBits = DontCareBitsAnalysis().findDontCareBits(RHS);
 
     for (auto Pair : LHSMustDemandedBits) {
-      if (DontCareBits.find(Pair.first) != DontCareBits.end() && (Pair.second & DontCareBits[Pair.first]) != 0) {
+      if (Pair.second != 0 && DontCareBits.find(Pair.first) == DontCareBits.end()) {
         // This input is must demanded in LHS and DontCare in RHS.
         if (StatsLevel > 2) {
           llvm::errs() << "Var : " << Pair.first->Name << " : ";
@@ -181,14 +221,13 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
                        << DontCareBits[Pair.first].toString(2, false) << "\n";
           llvm::errs() << "  pruned using demanded bits analysis.\n";
         }
-
         return true;
       }
     }
   }
 
   bool FoundNonTopAnalysisResult = false;
-
+  ForcedValueAnalysis FVA(RHS);
   for (int I = 0; I < InputVals.size(); ++I) {
     if (I > 9 && !FoundNonTopAnalysisResult) {
       break;
@@ -211,7 +250,7 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
       }
     }
 
-    if (LHSHasPhi) {
+    if (LHSHasPhi && AbstractInterpretPhi) {
       auto LHSCR = LHSConstantRange[I];
       auto RHSCR = ConstantRangeAnalysis().findConstantRange(RHS, ConcreteInterpreters[I]);
       if (!RHSCR.isFullSet()) {
@@ -236,7 +275,7 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
       if (!RHSKB.isUnknown()) {
         FoundNonTopAnalysisResult = true;
       }
-      if ((LHSKB.Zero & RHSKB.One) != 0 || (LHSKB.One & RHSKB.Zero) != 0) {
+      if (EnableKB && (LHSKB.Zero & RHSKB.One) != 0 || (LHSKB.One & RHSKB.Zero) != 0) {
         if (StatsLevel > 2) {
           llvm::errs() << "  LHS KnownBits = " << KnownBitsAnalysis::knownBitsString(LHSKB) << "\n";
           llvm::errs() << "  RHS KnownBits = " << KnownBitsAnalysis::knownBitsString(RHSKB) << "\n";
@@ -260,7 +299,7 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
           auto CR = ConstantRangeAnalysis().findConstantRange(RHS, ConcreteInterpreters[I]);
           if (StatsLevel > 2)
             llvm::errs() << "  RHS ConstantRange = " << CR << "\n";
-          if (!CR.contains(Val)) {
+          if (EnableCR && !CR.contains(Val)) {
             if (StatsLevel > 2) {
               llvm::errs() << "  pruned using CR! ";
               if (HasHole) {
@@ -275,7 +314,7 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
           auto KB = KnownBitsAnalysis().findKnownBits(RHS, ConcreteInterpreters[I]);
           if (StatsLevel > 2)
             llvm::errs() << "  RHS KnownBits = " << KnownBitsAnalysis::knownBitsString(KB) << "\n";
-          if ((KB.Zero & Val) != 0 || (KB.One & ~Val) != 0) {
+          if (EnableKB && (KB.Zero & Val) != 0 || (KB.One & ~Val) != 0) {
             if (StatsLevel > 2) {
               llvm::errs() << "  pruned using KB! ";
               if (HasHole) {
@@ -288,7 +327,23 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
             return true;
           }
 
-          if (!HasHole) {
+          if (EnableFB && RHS->nReservedConsts > 0) {
+            if (FVA.force(Val, ConcreteInterpreters[I])) {
+              // failed to force
+              if (StatsLevel > 2) {
+                llvm::errs() << "Pruned using ForcedValueAnalysis.\n";
+                if (HasHole) {
+                  llvm::errs() << "Inst had a hole.";
+                } else {
+                  llvm::errs() << "Inst had a symbolic const.";
+                }
+                llvm::errs() << "\n";
+              }
+              return true;
+            }
+          }
+
+          if (!HasHole && EnableHeavyDataflowPruning) {
             // !Concrete and !HasHole, must have a Symbolic Constant
             for (auto C : Constants) {
               if (ConstantLimits[C].size() <= MAX_PARTS) {
@@ -372,31 +427,33 @@ bool PruningManager::isInfeasible(souper::Inst *RHS,
     }
   }
 
-  for (auto &C : ConstantLimits) {
-    auto &Rs = C.second;
-    if (!Rs.empty()) {
-      // The other case is handled in the input specialization loop
-      if (StatsLevel > 2) {
-        llvm::errs() << "  Constant narrowing possibility. Restrict to: ";
-        for (auto X : Rs) {
-          llvm::errs() << X << "\t";
+  if (EnableHeavyDataflowPruning) {
+    for (auto &C : ConstantLimits) {
+      auto &Rs = C.second;
+      if (!Rs.empty()) {
+        // The other case is handled in the input specialization loop
+        if (StatsLevel > 2) {
+          llvm::errs() << "  Constant narrowing possibility. Restrict to: ";
+          for (auto X : Rs) {
+            llvm::errs() << X << "\t";
+          }
+          llvm::errs() << "\n";
         }
-        llvm::errs() << "\n";
-      }
 
-      size_t ResidualSize = 0;
-      for (auto &&R : Rs) {
-        ResidualSize += getSetSize(R).getLimitedValue();
-      }
+        size_t ResidualSize = 0;
+        for (auto &&R : Rs) {
+          ResidualSize += getSetSize(R).getLimitedValue();
+        }
 
-      if (ResidualSize < 8192 && Rs.size() < 3) {
-        // TODO: Tune. These thresholds control when the solver is involved
-        C.first->RangeRefinement = Rs;
+        if (ResidualSize < 8192 && Rs.size() < 3) {
+          // TODO: Tune. These thresholds control when the solver is involved
+          C.first->RangeRefinement = Rs;
+        }
       }
     }
-}
+  }
 
-  if (!LHSHasPhi) {
+  if (!LHSHasPhi && EnableHeavyDataflowPruning) {
     return isInfeasibleWithSolver(RHS, StatsLevel);
   } else {
     return false;
@@ -485,7 +542,7 @@ PruningManager::PruningManager(
                     InputVars(Inputs_) {}
 
 void PruningManager::init() {
-
+  setPhiConcretePreds(SC.LHS);
   Ante = SC.IC.getConst(llvm::APInt(1, true));
   for (auto PC : SC.PCs ) {
     Inst *Eq = SC.IC.getInst(Inst::Eq, 1, {PC.LHS, PC.RHS});
@@ -501,11 +558,13 @@ void PruningManager::init() {
   }
 
   if (hasGivenInst(SC.LHS, [](Inst *I){ return I->K == Inst::Phi;})) {
-    // Have to abstract interpret LHS because of phi
     LHSHasPhi = true;
-    for (unsigned I = 0; I < InputVals.size(); I++) {
-      LHSKnownBits.push_back(KnownBitsAnalysis().findKnownBits(SC.LHS, ConcreteInterpreters[I]));
-      LHSConstantRange.push_back(ConstantRangeAnalysis().findConstantRange(SC.LHS, ConcreteInterpreters[I]));
+    if (AbstractInterpretPhi) {
+      // Abstract interpret LHS because of phi
+      for (unsigned I = 0; I < InputVals.size(); I++) {
+        LHSKnownBits.push_back(KnownBitsAnalysis().findKnownBits(SC.LHS, ConcreteInterpreters[I]));
+        LHSConstantRange.push_back(ConstantRangeAnalysis().findConstantRange(SC.LHS, ConcreteInterpreters[I]));
+      }
     }
   }
 
@@ -513,6 +572,8 @@ void PruningManager::init() {
     DataflowPrune= [this](Inst *I, std::vector<Inst *> &RI) {
       TotalGuesses++;
       ReplacementContext RC;
+      RC.printInst(SC.LHS, llvm::errs(), true);
+      llvm::errs() << "=>?\n";
       RC.printInst(I, llvm::errs(), true);
       if (isInfeasible(I, StatsLevel)) {
         NumPruned++;
@@ -542,14 +603,64 @@ void PruningManager::init() {
   ConcreteInterpreter BlankCI;
   LHSKnownBitsNoSpec =  KnownBitsAnalysis().findKnownBits(SC.LHS, BlankCI, false);
   LHSMustDemandedBits = MustDemandedBitsAnalysis().findMustDemandedBits(SC.LHS);
+  improveMustDemandedBits(LHSMustDemandedBits);
+  EnableDemandedBitsPruning = false;
+  for (auto Pair : LHSMustDemandedBits) {
+    if (Pair.second != 0) {
+      EnableDemandedBitsPruning = true;
+      break;
+    }
+  }
+  ExprInfo::analyze(SC.LHS, LHSInfo);
+}
+
+bool isDataflowConsistent(ValueCache &Cache) {
+  for (auto &&Pair : Cache) {
+    if (Pair.second.hasValue()) {
+      auto *I = Pair.first;
+      llvm::APInt V = Pair.second.getValue();
+
+      if ((I->KnownZeros & V) != 0 || (I->KnownOnes & ~V) != 0) {
+        return false;
+      }
+
+      if (!I->Range.isFullSet()) {
+        if (!I->Range.contains(V)) {
+          return false;
+        }
+      }
+
+      if (I->NonZero && !V) {
+        return false;
+      }
+
+      if (I->NonNegative && V.isNegative()) {
+        return false;
+      }
+
+      if (I->PowOfTwo && !V.isPowerOf2()) {
+        return false;
+      }
+
+      if (I->Negative && !V.isNegative()) {
+        return false;
+      }
+
+      if (I->NumSignBits > V.getNumSignBits()) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 bool PruningManager::isInputValid(ValueCache &Cache) {
   ConcreteInterpreter CI(SC.LHS, Cache);
 
-  if (auto V = CI.evaluateInst(Ante); V.hasValue() && V.getValue().getLimitedValue() == 1)
-    return true;
-
+  if (isDataflowConsistent(Cache)) {
+    if (auto V = CI.evaluateInst(Ante); V.hasValue() && V.getValue().getLimitedValue() == 1)
+      return true;
+  }
   if (StatsLevel > 2) {
     llvm::errs() << "Input failed PC check: ";
     for (auto &&p : Cache) {
@@ -565,6 +676,35 @@ bool PruningManager::isInputValid(ValueCache &Cache) {
   }
 
   return false;
+}
+
+void PruningManager::improveMustDemandedBits(InputVarInfo &IVI) {
+  for (size_t i = 0; i < InputVals.size(); ++i) {
+    for (size_t j = 0; j < InputVals.size(); ++j) {
+      for (auto &Pair : IVI) {
+        auto Var = Pair.first;
+        auto &I1 = InputVals[i][Var];
+        auto &I2 = InputVals[j][Var];
+        if (I1.hasValue() && I1.hasValue() &&
+            I1.getValue() != I2.getValue()) {
+          auto &MDB = Pair.second;
+          for (size_t k = 0; k < Var->Width; ++k) {
+            if (!MDB[k] && I1.getValue()[k] != I2.getValue()[k]) {
+              auto V1 = ConcreteInterpreters[i].evaluateInst(SC.LHS);
+              auto V2 = ConcreteInterpreters[j].evaluateInst(SC.LHS);
+              if (V1.hasValue() && V2.hasValue() &&
+                  V1.getValue() != V2.getValue()) {
+                MDB.setBit(k);
+                // If two input values of a variable differing in the
+                // k'th bit can produce differing outputs, the k'th
+                // is required/must demanded/important.
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 namespace {
@@ -683,6 +823,49 @@ std::vector<ValueCache> PruningManager::generateInputSets(
   }
 
   return InputSets;
+}
+
+void ExprInfo::analyze(Inst *Root,
+                       std::unordered_map<Inst *, ExprInfo> &Result) {
+  ExprInfo EI{false, false, false};
+  if (Root->K == Inst::ReservedConst ||
+     (Root->K == Inst::Var && Root->SynthesisConstID != 0)) {
+    EI.HasConst = true;
+  } else if (Root->K == Inst::Var) {
+    EI.HasInput = true;
+  }
+  if (Root->K == Inst::Hole) {
+    EI.HasHole = true;
+  }
+  for (auto &&Op : Root->Ops) {
+    analyze(Op, Result);
+    auto &Part = Result[Op];
+    EI.HasHole |= Part.HasHole;
+    EI.HasConst |= Part.HasConst;
+    EI.HasInput |= Part.HasInput;
+  }
+  Result[Root] = EI;
+}
+
+void PruningManager::setPhiConcretePreds(Inst *Root) {
+  std::unordered_set<Inst *> Visited;
+  std::vector<Inst *> Stack{Root};
+  while (!Stack.empty()) {
+    Inst *Current = Stack.back();
+
+    Stack.pop_back();
+
+    if (Current->K == Inst::Phi) {
+      Current->B->ConcretePred = 0;
+    }
+    Visited.insert(Current);
+
+    for (auto Child : Current->Ops) {
+      if (Visited.find(Child) == Visited.end()) {
+        Stack.push_back(Child);
+      }
+    }
+  }
 }
 
 }

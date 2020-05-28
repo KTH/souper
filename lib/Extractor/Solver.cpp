@@ -375,7 +375,8 @@ public:
 
   std::error_code infer(const BlockPCs &BPCs,
                         const std::vector<InstMapping> &PCs,
-                        Inst *LHS, Inst *&RHS, InstContext &IC) override {
+                        Inst *LHS, std::vector<Inst *> &RHSs,
+                        bool AllowMultipleRHSs, InstContext &IC) override {
     std::error_code EC;
 
 
@@ -393,7 +394,7 @@ public:
       std::vector<Inst *>Guesses { IC.getConst(APInt(LHS->Width, 0)),
                                    IC.getConst(APInt(LHS->Width, 1)) };
       if (LHS->Width > 1)
-        Guesses.emplace_back(IC.getConst(APInt(LHS->Width, -1)));
+        Guesses.emplace_back(IC.getConst(APInt::getAllOnesValue(LHS->Width)));
       for (auto I : Guesses) {
         InstMapping Mapping(LHS, I);
 
@@ -404,7 +405,7 @@ public:
           bool IsValid = isTransformationValid(Mapping.LHS, Mapping.RHS,
                                                PCs, IC);
           if (IsValid) {
-            RHS = I;
+            RHSs.emplace_back(I);
             return std::error_code();
           }
           // TODO: Propagate errors from Alive backend, exit early for errors
@@ -421,7 +422,7 @@ public:
           if (EC)
             return EC;
           if (!IsSat) {
-            RHS = I;
+            RHSs.emplace_back(I);
             return EC;
           }
         }
@@ -430,7 +431,6 @@ public:
 
     if (InferInts && SMTSolver->supportsModels() && LHS->Width > 1) {
       Inst *C = IC.createSynthesisConstant(LHS->Width, /*SynthesisConstID=*/1);
-
       if (UseAlive) {
         Inst *Ante = IC.getConst(llvm::APInt(1, true));
         for (auto PC : PCs ) {
@@ -441,7 +441,7 @@ public:
         AliveDriver Synthesizer(LHS, Ante, IC);
         auto ConstantMap = Synthesizer.synthesizeConstantsWithCegis(C, IC);
         if (ConstantMap.find(C) != ConstantMap.end()) {
-          RHS = IC.getConst(ConstantMap[C]);
+          RHSs.emplace_back(IC.getConst(ConstantMap[C]));
           return std::error_code();
         }
         // TODO: Propagate errors from Alive backend, exit early for errors
@@ -450,9 +450,9 @@ public:
         std::set<Inst*> ConstSet{C};
         ConstantSynthesis CS;
         EC = CS.synthesize(SMTSolver.get(), BPCs, PCs, InstMapping(LHS, C), ConstSet,
-                           ResultMap, IC, /*MaxTries=*/20000, Timeout);
+                           ResultMap, IC, /*MaxTries=*/1000, Timeout);
         if (ResultMap.find(C) != ResultMap.end()) {
-          RHS = IC.getConst(ResultMap[C]);
+          RHSs.emplace_back(IC.getConst(ResultMap[C]));
           return std::error_code();
         }
       }
@@ -465,18 +465,21 @@ public:
     if(SMTSolver->supportsModels()) {
       if (EnableEnumerativeSynthesis) {
         EnumerativeSynthesis ES;
-        EC = ES.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHS, IC, Timeout);
-        if (EC || RHS)
+        EC = ES.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHSs,
+                           AllowMultipleRHSs, IC, Timeout);
+        if (EC || !RHSs.empty())
           return EC;
       } else if (InferInsts) {
         InstSynthesis IS;
+        Inst *RHS;
         EC = IS.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHS, IC, Timeout);
+        RHSs.emplace_back(RHS);
         if (EC || RHS)
           return EC;
       }
     }
 
-    RHS = 0;
+    RHSs.clear();
     return EC;
   }
 
@@ -525,7 +528,8 @@ public:
                              std::set<Inst *> &ConstSet,
                              std::map<Inst *, llvm::APInt> &ResultMap,
                              InstContext &IC) override {
-    SynthesisContext SC{IC, SMTSolver.get(), LHS, /*LHSUB*/nullptr, PCs, BPCs, Timeout};
+    SynthesisContext SC{IC, SMTSolver.get(), LHS, /*LHSUB*/nullptr, PCs,
+                        BPCs, /*CheckAllGuesses=*/false, Timeout};
     // TODO: Construct LHSUB, a predicate which evaluates to true when corresponding inputs
     // case LHS to evaluate to UB
     std::vector<Inst *> Inputs;
@@ -534,7 +538,8 @@ public:
     Pruner.init();
     ConstantSynthesis CS{&Pruner};
     std::error_code EC = CS.synthesize(SMTSolver.get(), BPCs, PCs, InstMapping(LHS, RHS),
-                                       ConstSet, ResultMap, IC, MaxConstantSynthesisTries, Timeout);
+                                       ConstSet, ResultMap, IC, MaxConstantSynthesisTries,
+                                       Timeout, /*AvoidNops=*/false);
 
     if (EC || ResultMap.empty())
       return EC;
@@ -544,8 +549,6 @@ public:
     RHS = getInstCopy(RHS, IC, InstCache, BlockCache, &ResultMap, false);
     return EC;
   }
-
-
 
   bool testKnown(const BlockPCs &BPCs,
                  const std::vector<InstMapping> &PCs,
@@ -602,7 +605,8 @@ public:
     // the query to take care of UB, therefore, the new query is or(trunc(LHS), 1) = Guess(ReservedX, LHS)
     LHS = IC.getInst(Inst::Or, 1, {IC.getInst(Inst::Trunc, 1, {LHS}), IC.getConst(llvm::APInt(1, true))}),
     CS.synthesize(SMTSolver.get(), BPCs, PCs, InstMapping(LHS, Guess),
-                  ConstSet, ResultMap, IC, MaxConstantSynthesisTries, Timeout);
+                  ConstSet, ResultMap, IC, MaxConstantSynthesisTries, Timeout,
+                  /*AvoidNops=*/false);
     if (ResultMap.empty()) {
       IsFound = false;
     } else {
@@ -664,16 +668,19 @@ public:
 
   std::error_code infer(const BlockPCs &BPCs,
                         const std::vector<InstMapping> &PCs,
-                        Inst *LHS, Inst *&RHS, InstContext &IC) override {
+                        Inst *LHS, std::vector<Inst *> &RHSs,
+                        bool AllowMultipleRHSs, InstContext &IC) override {
     ReplacementContext Context;
     std::string Repl = GetReplacementLHSString(BPCs, PCs, LHS, Context);
     const auto &ent = InferCache.find(Repl);
     if (ent == InferCache.end()) {
       ++MemMissesInfer;
-      std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHS, IC);
+      std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHSs,
+                                                   AllowMultipleRHSs, IC);
       std::string RHSStr;
-      if (!EC && RHS) {
-        RHSStr = GetReplacementRHSString(RHS, Context);
+      if (!EC && !RHSs.empty()) {
+        // TODO: support multi RHSs caching
+        RHSStr = GetReplacementRHSString(RHSs.front(), Context);
       }
       InferCache.emplace(Repl, std::make_pair(EC, RHSStr));
       return EC;
@@ -682,12 +689,12 @@ public:
       std::string ES;
       StringRef S = ent->second.second;
       if (S == "") {
-        RHS = 0;
+        RHSs.clear();
       } else {
         ParsedReplacement R = ParseReplacementRHS(IC, "<cache>", S, Context, ES);
         if (ES != "")
           return std::make_error_code(std::errc::protocol_error);
-        RHS = R.Mapping.RHS;
+        RHSs.emplace_back(R.Mapping.RHS);
       }
       return ent->second.first;
     }
@@ -809,7 +816,9 @@ public:
 
   std::error_code infer(const BlockPCs &BPCs,
                         const std::vector<InstMapping> &PCs,
-                        Inst *LHS, Inst *&RHS, InstContext &IC) override {
+                        Inst *LHS, std::vector<Inst *> &RHSs,
+                        bool AllowMultipleRHSs,
+                        InstContext &IC) override {
     ReplacementContext Context;
     std::string LHSStr = GetReplacementLHSString(BPCs, PCs, LHS, Context);
     if (LHSStr.length() > MaxLHSSize)
@@ -818,26 +827,28 @@ public:
     if (KV->hGet(LHSStr, "result", S)) {
       ++ExternalHits;
       if (S == "") {
-        RHS = 0;
+        RHSs.clear();
       } else {
         std::string ES;
         ParsedReplacement R = ParseReplacementRHS(IC, "<cache>", S, Context, ES);
         if (ES != "")
           return std::make_error_code(std::errc::protocol_error);
-        RHS = R.Mapping.RHS;
+        RHSs.emplace_back(R.Mapping.RHS);
       }
       return std::error_code();
     } else {
       ++ExternalMisses;
       if (NoInfer) {
-        RHS = 0;
+        RHSs.clear();
         KV->hSet(LHSStr, "result", "");
         return std::error_code();
       }
-      std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHS, IC);
+      std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHSs,
+                                                   AllowMultipleRHSs, IC);
       std::string RHSStr;
-      if (!EC && RHS) {
-        RHSStr = GetReplacementRHSString(RHS, Context);
+      if (!EC && !RHSs.empty()) {
+        // TODO: support multi RHSs caching
+        RHSStr = GetReplacementRHSString(RHSs.front(), Context);
       }
       KV->hSet(LHSStr, "result", RHSStr);
       return EC;

@@ -28,6 +28,14 @@ namespace souper {
 
 typedef std::function<bool(Inst *, std::vector<Inst *>&)> PruneFunc;
 
+struct ExprInfo {
+  bool HasHole;
+  bool HasInput;
+  bool HasConst;
+  // Also consider properties like "JustArithmetic, JustBitwise, etc"
+  static void analyze(Inst *Root, std::unordered_map<Inst *, ExprInfo> &Result);
+};
+
 class PruningManager {
 public:
   PruningManager(SynthesisContext &SC_, std::vector< souper::Inst *> &Inputs_,
@@ -49,9 +57,12 @@ private:
   std::vector<ConcreteInterpreter> ConcreteInterpreters;
   std::vector<llvm::KnownBits> LHSKnownBits;
   std::vector<llvm::ConstantRange> LHSConstantRange;
+  HoleAnalysis HA;
   llvm::KnownBits LHSKnownBitsNoSpec;
   InputVarInfo LHSMustDemandedBits;
+  bool EnableDemandedBitsPruning = false;
   bool LHSHasPhi = false;
+  std::unordered_map<Inst *, ExprInfo> LHSInfo;
 
   PruneFunc DataflowPrune;
   unsigned NumPruned;
@@ -60,8 +71,10 @@ private:
   std::vector<ValueCache> InputVals;
   std::vector<Inst *> &InputVars;
   std::vector<ValueCache> generateInputSets(std::vector<Inst *> &Inputs);
+  void setPhiConcretePreds(Inst *Root);
   // For the LHS contained in @SC, check if the given input in @Cache is valid.
   bool isInputValid(ValueCache &Cache);
+  void improveMustDemandedBits(InputVarInfo &IVI);
   Inst *Ante;
 };
 

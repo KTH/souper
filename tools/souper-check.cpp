@@ -17,6 +17,7 @@
 #include "llvm/Support/KnownBits.h"
 
 #include "souper/Infer/ConstantSynthesis.h"
+#include "souper/Infer/Pruning.h"
 #include "souper/Inst/InstGraph.h"
 #include "souper/Parser/Parser.h"
 #include "souper/Tool/GetSolverFromArgs.h"
@@ -63,6 +64,14 @@ static cl::opt<bool> ParseLHSOnly("parse-lhs-only",
 
 static cl::opt<bool> EmitLHSDot("emit-lhs-dot",
     cl::desc("Emit DOT format DAG for LHS of given souper IR (default=false)"),
+    cl::init(false));
+
+static cl::opt<bool> TryDataflowPruning("try-dataflow-pruning",
+    cl::desc("Attempt to prove inequivalence using dataflow analysis (default=false)"),
+    cl::init(false));
+
+static cl::opt<bool> CheckAllGuesses("souper-check-all-guesses",
+    cl::desc("Continue even after a valid RHS is found. (default=false)"),
     cl::init(false));
 
 int SolveInst(const MemoryBufferRef &MB, Solver *S) {
@@ -203,17 +212,19 @@ int SolveInst(const MemoryBufferRef &MB, Solver *S) {
       }
     } else if (InferRHS || ReInferRHS) {
       int OldCost;
+      std::vector<Inst *> RHSs;
       if (ReInferRHS) {
         OldCost = cost(Rep.Mapping.RHS);
         Rep.Mapping.RHS = 0;
       }
       if (std::error_code EC = S->infer(Rep.BPCs, Rep.PCs, Rep.Mapping.LHS,
-                                        Rep.Mapping.RHS, IC)) {
+                                        RHSs, CheckAllGuesses, IC)) {
         llvm::errs() << EC.message() << '\n';
         Ret = 1;
         ++Error;
       }
-      if (Rep.Mapping.RHS) {
+      if (!RHSs.empty()) {
+        Rep.Mapping.RHS = RHSs.front();
         ++Success;
         if (ReInferRHS) {
           int NewCost = cost(Rep.Mapping.RHS);
@@ -227,17 +238,27 @@ int SolveInst(const MemoryBufferRef &MB, Solver *S) {
         } else {
           llvm::outs() << "; RHS inferred successfully\n";
         }
-        if (PrintRepl) {
-          PrintReplacement(llvm::outs(), Rep.BPCs, Rep.PCs, Rep.Mapping);
-        } else if (PrintReplSplit) {
-          ReplacementContext Context;
-          PrintReplacementLHS(llvm::outs(), Rep.BPCs, Rep.PCs,
-                              Rep.Mapping.LHS, Context);
-          PrintReplacementRHS(llvm::outs(), Rep.Mapping.RHS, Context);
+
+        if (CheckAllGuesses) {
+          for (unsigned RI = 0 ; RI < RHSs.size() ; RI++) {
+            llvm::outs()<<"; result " << (RI + 1) <<":\n";
+            ReplacementContext RC;
+            PrintReplacementRHS(llvm::outs(), RHSs[RI], RC);
+            llvm::outs()<<"\n";
+          }
         } else {
-          ReplacementContext Context;
-          PrintReplacementRHS(llvm::outs(), Rep.Mapping.RHS,
-                              ReInferRHS ? Context : Contexts[Index]);
+          if (PrintRepl) {
+            PrintReplacement(llvm::outs(), Rep.BPCs, Rep.PCs, Rep.Mapping);
+          } else if (PrintReplSplit) {
+            ReplacementContext Context;
+            PrintReplacementLHS(llvm::outs(), Rep.BPCs, Rep.PCs,
+                                Rep.Mapping.LHS, Context);
+            PrintReplacementRHS(llvm::outs(), Rep.Mapping.RHS, Context);
+          } else {
+            ReplacementContext Context;
+            PrintReplacementRHS(llvm::outs(), Rep.Mapping.RHS,
+                                ReInferRHS ? Context : Contexts[Index]);
+          }
         }
       } else {
         ++Fail;
@@ -274,6 +295,19 @@ int SolveInst(const MemoryBufferRef &MB, Solver *S) {
           ++Fail;
           llvm::outs() << "; Failed to infer RHS\n";
         }
+      }
+    } else if (TryDataflowPruning) {
+      SynthesisContext SC{IC, /*Solver(UNUSED)*/nullptr, Rep.Mapping.LHS,
+        /*LHSUB(UNUSED)*/nullptr, Rep.PCs, Rep.BPCs,
+        /*CheckAllGuesses(UNUSED)*/true, /*Timeout(UNUSED)*/100};
+      std::vector<Inst *> Inputs;
+      findVars(SC.LHS, Inputs);
+      PruningManager P(SC, Inputs, /*StatsLevel=*/3);
+      P.init();
+      if (P.isInfeasible(Rep.Mapping.RHS, /*StatsLevel=*/3)) {
+        llvm::outs() << "Pruning succeeded.\n";
+      } else {
+        llvm::outs() << "Pruning failed.\n";
       }
     } else {
       bool Valid;

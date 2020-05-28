@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/bash -e
 
 # Copyright 2014 The Souper Authors. All rights reserved.
 #
@@ -19,15 +19,19 @@ if [ -d "third_party" ]; then
   exit 1;
 fi
 
+ncpus=$(command nproc 2>/dev/null || command sysctl -n hw.ncpu 2>/dev/null || echo 8)
+
 # hiredis version 0.14.0
 hiredis_commit=685030652cd98c5414ce554ff5b356dfe8437870
-llvm_branch=tags/RELEASE_900/final
+llvm_repo=https://github.com/regehr/llvm-project.git
+# llvm_checkout specifies the git branch or hash to checkout to
+llvm_checkout=disable-peepholes
 klee_repo=https://github.com/rsas/klee
 klee_branch=pure-bv-qf-llvm-7.0
-alive_commit=9823174bb34fcb9c8e33c37e7e04d46bfe3a29a5
+alive_commit=92ad3f5f2f963ef5bd43f71a4137427bd6cce51b
 alive_repo=https://github.com/manasij7479/alive2.git
 z3_repo=https://github.com/Z3Prover/z3.git
-z3_commit=d44081db7d736945d450b0ecb93ec39602fc4bd5
+z3_commit=1729232254340706ee07e10567888396bead7a29 # bumped on May 21 2020
 
 llvm_build_type=Release
 if [ -n "$1" ] ; then
@@ -40,9 +44,17 @@ z3_installdir=$(pwd)/third_party/z3-install
 git clone $z3_repo $z3_srcdir
 mkdir -p $z3_installdir
 
-(cd $z3_srcdir && git checkout $z3_commit && python scripts/mk_make.py --staticlib --prefix=$z3_installdir && cd build && make -j8 install)
+(cd $z3_srcdir && git checkout $z3_commit && python scripts/mk_make.py --prefix=$z3_installdir && cd build && make -j $ncpus install)
 
 export PATH=$z3_installdir/bin:$PATH
+export LD_LIBRARY_PATH=$z3_installdir/lib:$LD_LIBRARY_PATH
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # Mac
+  Z3_SHAREDLIB=libz3.dylib
+else
+  Z3_SHAREDLIB=libz3.so
+fi
 
 alivedir=third_party/alive2
 alive_builddir=$alivedir/build
@@ -51,28 +63,26 @@ git clone $alive_repo $alivedir/alive2
 git -C $alivedir/alive2 checkout $alive_commit
 
 if [ -n "`which ninja`" ] ; then
-  (cd $alive_builddir && cmake ../alive2 -DZ3_LIBRARIES=$z3_installdir/lib/libz3.a -DZ3_INCLUDE_DIR=$z3_installdir/include -DCMAKE_BUILD_TYPE=$llvm_build_type -GNinja)
+  (cd $alive_builddir && cmake ../alive2 -DZ3_LIBRARIES=$z3_installdir/lib/$Z3_SHAREDLIB -DZ3_INCLUDE_DIR=$z3_installdir/include -DCMAKE_BUILD_TYPE=$llvm_build_type -GNinja)
   ninja -C $alive_builddir
 else
-  (cd $alive_builddir && cmake ../alive2 -DZ3_LIBRARIES=$z3_installdir/lib/libz3.a -DZ3_INCLUDE_DIR=$z3_installdir/include -DCMAKE_BUILD_TYPE=$llvm_build_type)
-  make -C $alive_builddir -j8
+  (cd $alive_builddir && cmake ../alive2 -DZ3_LIBRARIES=$z3_installdir/lib/$Z3_SHAREDLIB -DZ3_INCLUDE_DIR=$z3_installdir/include -DCMAKE_BUILD_TYPE=$llvm_build_type)
+  make -C $alive_builddir -j $ncpus
 fi
 
 llvm_srcdir=third_party/llvm
 llvm_installdir=$(pwd)/${llvm_srcdir}/$llvm_build_type
 llvm_builddir=$(pwd)/${llvm_srcdir}/${llvm_build_type}-build
 
-svn co https://llvm.org/svn/llvm-project/llvm/${llvm_branch} ${llvm_srcdir}
-svn co https://llvm.org/svn/llvm-project/cfe/${llvm_branch} ${llvm_srcdir}/tools/clang
-svn co https://llvm.org/svn/llvm-project/compiler-rt/${llvm_branch} ${llvm_srcdir}/projects/compiler-rt
+git clone $llvm_repo $llvm_srcdir
+git -C $llvm_srcdir checkout $llvm_checkout
+
 # Disable the broken select -> logic optimizations
-patch ${llvm_srcdir}/lib/Transforms/InstCombine/InstCombineSelect.cpp < patches/disable-instcombine-select-to-logic.patch
-# Apply instcombine switch patch
-patch -d ${llvm_srcdir} -p0 -i $(pwd)/patches/enable-instcombine-switch.patch
+git -C ${llvm_srcdir} apply $(pwd)/patches/0002-disable-instcombine-select-to-logic.patch
 
 mkdir -p $llvm_builddir
 
-cmake_flags=".. -DCMAKE_INSTALL_PREFIX=$llvm_installdir -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_FORCE_ENABLE_STATS=On -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly -DLLVM_TARGETS_TO_BUILD=host -DCMAKE_BUILD_TYPE=$llvm_build_type -DZ3_INCLUDE_DIR=$z3_installdir/include -DZ3_LIBRARIES=$z3_installdir/lib/libz3.a"
+cmake_flags="../llvm -DCMAKE_INSTALL_PREFIX=$llvm_installdir -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_FORCE_ENABLE_STATS=On -DCMAKE_BUILD_TYPE=$llvm_build_type -DZ3_INCLUDE_DIR=$z3_installdir/include -DZ3_LIBRARIES=$z3_installdir/lib/$Z3_SHAREDLIB -DLLVM_ENABLE_PROJECTS='llvm;clang;compiler-rt'"
 
 if [ -n "`which ninja`" ] ; then
   (cd $llvm_builddir && cmake -G Ninja $cmake_flags "$@")
@@ -80,8 +90,8 @@ if [ -n "`which ninja`" ] ; then
   ninja -C $llvm_builddir install
 else
   (cd $llvm_builddir && cmake $cmake_flags "$@")
-  make -C $llvm_builddir -j8
-  make -C $llvm_builddir -j8 install
+  make -C $llvm_builddir -j $ncpus
+  make -C $llvm_builddir -j $ncpus install
 fi
 
 # we want these but they don't get installed by default
