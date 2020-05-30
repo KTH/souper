@@ -28,7 +28,7 @@ run export CC=clang CXX=clang++ \
 	&& cd /usr/src/souper \
 #	&& ./build_deps.sh Debug \
 #       && rm -rf third_party/llvm/Debug-build \
-	&& ./build_deps.sh Release \
+	&& bash ./build_deps.sh Release \
         && rm -rf third_party/llvm/Release-build \
 	&& rm -rf third_party/hiredis/install/lib/libhiredis.so*
 
@@ -48,14 +48,5 @@ run export GOPATH=/usr/src/go \
 	&& mkdir -p /usr/src/souper-build \
 	&& cd /usr/src/souper-build \
 	&& CC=/usr/src/souper/third_party/llvm/Release/bin/clang CXX=/usr/src/souper/third_party/llvm/Release/bin/clang++ cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DTEST_SYNTHESIS=ON ../souper \
-	&& ninja souperweb souperweb-backend \
-        && ninja check \
-	&& cp souperweb souperweb-backend /usr/local/bin \
-        && cd .. \
-        && rm -rf /usr/src/souper-build \
-	&& strip /usr/local/bin/* \
-	&& groupadd -r souper \
-	&& useradd -m -r -g souper souper \
-	&& mkdir /data \
-	&& chown souper:souper /data \
-	&& rm -rf /usr/local/include /usr/local/lib/*.a /usr/local/lib/*.la
+	&& ninja 
+run ls /usr/src/souper-build
