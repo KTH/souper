@@ -422,7 +422,7 @@ public:
           if (EC)
             return EC;
           if (!IsSat) {
-            RHSs.emplace_back(I);
+            RHSs.emplace_back(I); // SLUMPS do not return
             return EC;
           }
         }
@@ -442,7 +442,7 @@ public:
         auto ConstantMap = Synthesizer.synthesizeConstantsWithCegis(C, IC);
         if (ConstantMap.find(C) != ConstantMap.end()) {
           RHSs.emplace_back(IC.getConst(ConstantMap[C]));
-          return std::error_code();
+          return std::error_code(); // SLUMPS do not return or return if size is greater than...
         }
         // TODO: Propagate errors from Alive backend, exit early for errors
       } else {
@@ -459,7 +459,7 @@ public:
     }
 
     // Do not do further synthesis if LHS is harvested from uses.
-    if (LHS->HarvestKind == HarvestType::HarvestedFromUse)
+    if (LHS->HarvestKind == HarvestType::HarvestedFromUse) // SLUMPS remove
       return EC;
 
     if(SMTSolver->supportsModels()) {
@@ -468,14 +468,14 @@ public:
         EC = ES.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHSs,
                            AllowMultipleRHSs, IC, Timeout);
         if (EC || !RHSs.empty())
-          return EC;
+          return EC; // SLUMPs remove do not return
       } else if (InferInsts) {
         InstSynthesis IS;
         Inst *RHS;
         EC = IS.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHS, IC, Timeout);
         RHSs.emplace_back(RHS);
         if (EC || RHS)
-          return EC;
+          return EC; // SLUMPS do not return
       }
     }
 

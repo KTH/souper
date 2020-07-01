@@ -276,7 +276,7 @@ public:
       std::vector<Inst *> RHSs;
       if (std::error_code EC =
           S->infer(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,
-                   RHSs, /*AllowMultipleRHSs=*/false, IC)) {
+                   RHSs, /*AllowMultipleRHSs=*/true, IC)) {
         if (EC == std::errc::timed_out ||
             EC == std::errc::value_too_large) {
           continue;

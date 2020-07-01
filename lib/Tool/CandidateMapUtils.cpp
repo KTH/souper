@@ -169,7 +169,7 @@ bool SolveCandidateMap(llvm::raw_ostream &OS, CandidateMap &M,
         std::vector<Inst *> RHSs;
         if (std::error_code EC =
             S->infer(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,
-                     RHSs, /*AllowMultipleRHSs=*/false, IC)) {
+                     RHSs, /*AllowMultipleRHSs=*/true, IC)) {
           llvm::errs() << "Unable to query solver: " << EC.message() << '\n';
           return false;
         }
@@ -219,7 +219,7 @@ bool CheckCandidateMap(llvm::Module &Mod, CandidateMap &M, Solver *S,
     std::vector<Inst *> RHSs;
     if (std::error_code EC =
         S->infer(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,
-                 RHSs, /*AllowMultipleRHSs=*/false, IC)) {
+                 RHSs, /*AllowMultipleRHSs=*/true, IC)) {
       llvm::errs() << "Unable to query solver: " << EC.message() << '\n';
       return false;
     }
