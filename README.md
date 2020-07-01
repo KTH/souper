@@ -11,9 +11,6 @@ http://llvm.org/docs/GettingStarted.html#getting-a-modern-host-c-toolchain
 
 You will also need CMake to build Souper and its dependencies.
 
-To run Souper over a bitcode file, you will need an SMT solver. Souper
-can use Z3, Boolector, CVC4, or STP. We recommend Z3.
-
 If you have Go installed, you will also need the Redigo Redis client:
 ```
 $ go get github.com/gomodule/redigo/redis
@@ -36,10 +33,7 @@ $ cd /path/to/souper-build
 $ cmake -DCMAKE_BUILD_TYPE=$buildtype /path/to/souper
 ```
    Again, the build type is optional and defaults to Release. In any case it
-   must match the build type used when compiling the dependencies. If you want
-   to run Souper's full test suite, add this option to CMake (with the
-   appropriate solver and path to the solver executable):
-   -DTEST_SOLVER="-z3-path=/usr/bin/z3"
+   must match the build type used when compiling the dependencies.
 
 3. Run 'make' from the build directory.
 
@@ -59,17 +53,6 @@ executable in /path/to/souper-build/souper and a Clang executable in
 Clang executable to create an LLVM bitcode file like this:
 ```
 $ /path/to/clang -emit-llvm -c -o /path/to/file.bc /path/to/file.c
-```
-
-Once you have a bitcode file you can invoke Souper with the path to the
-bitcode file as a command line argument. You will also need one of these
-flags to tell Souper where the SMT solver executable is:
-
-```
--z3-path=<path>              - Path to Z3 executable
--boolector-path=<path>       - Path to Boolector executable
--cvc4-path=<path>            - Path to CVC4 executable
--stp-path=<path>             - Path to STP executable
 ```
 
 For example:
@@ -103,7 +86,6 @@ $ /path/to/opt -load /path/to/libsouperPass.so -souper \
 
 Or use the drop-in compiler replacements sclang and sclang++:
 ```
-$ export SOUPER_SOLVER=-z3-path=/usr/bin/z3
 $ /path/to/configure CC=/path/to/sclang CXX=/path/to/sclang++
 $ make
 ```

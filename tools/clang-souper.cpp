@@ -27,7 +27,7 @@
 #include "llvm/Support/Signals.h"
 #include "souper/ClangTool/Actions.h"
 #include "souper/Tool/CandidateMapUtils.h"
-#include "souper/Tool/GetSolverFromArgs.h"
+#include "souper/Tool/GetSolver.h"
 #include <system_error>
 
 using namespace clang;
@@ -36,6 +36,15 @@ using namespace llvm;
 using namespace souper;
 
 static cl::OptionCategory ClangSouperCategory("clang-souper options");
+
+unsigned DebugLevel;
+
+static cl::opt<unsigned, /*ExternalStorage=*/true>
+DebugFlagParser("souper-debug-level",
+     cl::desc("Control the verbose level of debug output (default=1). "
+     "The larger the number is, the more fine-grained debug "
+     "information will be printed."),
+     cl::location(DebugLevel), cl::init(1));
 
 int main(int argc, const char **argv) {
   llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
@@ -52,6 +61,6 @@ int main(int argc, const char **argv) {
   Tool.run(Factory.get());
 
   KVStore *KV = 0;
-  std::unique_ptr<Solver> S = GetSolverFromArgs(KV);
+  std::unique_ptr<Solver> S = GetSolver(KV);
   return SolveCandidateMap(llvm::outs(), CandMap, S.get(), IC, 0) ? 0 : 1;
 }

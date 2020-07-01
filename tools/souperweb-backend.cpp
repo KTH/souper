@@ -23,7 +23,7 @@
 #include "souper/SMTLIB2/Solver.h"
 #include "souper/Parser/Parser.h"
 #include "souper/Tool/CandidateMapUtils.h"
-#include "souper/Tool/GetSolverFromArgs.h"
+#include "souper/Tool/GetSolver.h"
 
 using namespace llvm;
 using namespace souper;
@@ -90,7 +90,7 @@ static llvm::cl::opt<std::string> Action("action", llvm::cl::init(""));
 int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv);
   KVStore *KV;
-  std::unique_ptr<Solver> S = GetSolverFromArgs(KV);
+  std::unique_ptr<Solver> S = GetSolver(KV);
 
   auto MB = MemoryBuffer::getSTDIN();
   if (MB) {

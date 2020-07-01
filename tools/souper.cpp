@@ -27,11 +27,20 @@
 #include "souper/Extractor/Candidates.h"
 #include "souper/SMTLIB2/Solver.h"
 #include "souper/Tool/CandidateMapUtils.h"
-#include "souper/Tool/GetSolverFromArgs.h"
+#include "souper/Tool/GetSolver.h"
 #include <iostream>
 
 using namespace llvm;
 using namespace souper;
+
+unsigned DebugLevel;
+
+static cl::opt<unsigned, /*ExternalStorage=*/true>
+DebugFlagParser("souper-debug-level",
+     cl::desc("Control the verbose level of debug output (default=1). "
+     "The larger the number is, the more fine-grained debug "
+     "information will be printed."),
+     cl::location(DebugLevel), cl::init(1));
 
 static cl::opt<std::string>
 InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
@@ -91,7 +100,7 @@ int main(int argc, char **argv) {
   }
 
   KVStore *KV = 0;
-  std::unique_ptr<Solver> S = GetSolverFromArgs(KV);
+  std::unique_ptr<Solver> S = GetSolver(KV);
 
   InstContext IC;
   ExprBuilderContext EBC;

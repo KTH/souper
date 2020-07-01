@@ -30,6 +30,7 @@
 #include "llvm/Pass.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Scalar/DCE.h"
@@ -39,7 +40,7 @@
 #include "souper/KVStore/KVStore.h"
 #include "souper/SMTLIB2/Solver.h"
 #include "souper/Codegen/Codegen.h"
-#include "souper/Tool/GetSolverFromArgs.h"
+#include "souper/Tool/GetSolver.h"
 #include "souper/Tool/CandidateMapUtils.h"
 #include "set"
 
@@ -49,19 +50,22 @@ STATISTIC(DominanceCheckFailed, "Number of failed replacement due to dominance c
 using namespace souper;
 using namespace llvm;
 
+unsigned DebugLevel;
+
 namespace {
 std::unique_ptr<Solver> S;
 unsigned ReplacementIdx, ReplacementsDone, TotalCandidates;
 KVStore *KV;
 
-std::string nametext;
-
-
-static cl::opt<unsigned> DebugLevel("souper-debug-level", cl::Hidden,
-     cl::init(1),
+static cl::opt<unsigned, /*ExternalStorage=*/true>
+DebugFlagParser("souper-debug-level",
      cl::desc("Control the verbose level of debug output (default=1). "
      "The larger the number is, the more fine-grained debug "
-     "information will be printed."));
+     "information will be printed."),
+     cl::location(DebugLevel), cl::init(1));
+
+static cl::opt<bool> Verify("souper-verify", cl::init(false),
+    cl::desc("Verify the module before and after Souper (default=false)"));
 
 static cl::opt<bool> DynamicProfile("souper-dynamic-profile", cl::init(false),
     cl::desc("Dynamic profiling of Souper optimizations (default=false)"));
@@ -112,11 +116,9 @@ struct SouperPass : public ModulePass {
 public:
   SouperPass() : ModulePass(ID) {
     if (!S) {
-      S = GetSolverFromArgs(KV);
+      S = GetSolver(KV);
       if (StaticProfile && !KV)
         KV = new KVStore;
-      if (!S)
-        report_fatal_error("Souper requires a solver to be specified");
     }
   }
 
@@ -202,8 +204,20 @@ public:
   }
 
   bool runOnFunction(Function *F) {
-    bool Changed = false;
-    nametext = "";
+    std::string FunctionName;
+    if (F->hasLocalLinkage()) {
+      FunctionName =
+        (F->getParent()->getModuleIdentifier() + ":" + F->getName()).str();
+    } else {
+      FunctionName = F->getName();
+    }
+
+    if (DebugLevel > 1) {
+      errs() << "\n";
+      errs() << "; entering Souper's runOnFunction() for " << FunctionName << "()\n\n";
+      F->getParent()->dump();
+      errs() << "\n";
+    }
 
     InstContext IC;
     ExprBuilderContext EBC;
@@ -224,37 +238,26 @@ public:
     TargetLibraryInfo* TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(*F);
     if (!TLI)
       report_fatal_error("getTLI() failed");
+
     FunctionCandidateSet CS = ExtractCandidatesFromPass(F, LI, DB, LVI, SE, TLI, IC, EBC);
 
-    std::string FunctionName;
-    if (F->hasLocalLinkage()) {
-      FunctionName =
-        (F->getParent()->getModuleIdentifier() + ":" + F->getName()).str();
-    } else {
-      FunctionName = F->getName();
-    }
-
-    if (DebugLevel > 1) {
-      errs() << "\n";
-      errs() << "; Listing all replacements for " << FunctionName << "\n";
-      errs() << "; Using solver: " << S->getName() << '\n';
-    }
+    if (DebugLevel > 3)
+      errs() << "; extracted candidates\n";
 
     CandidateMap CandMap;
     for (auto &B : CS.Blocks) {
       for (auto &R : B->Replacements) {
-        if (DebugLevel > 3) {
+        if (DebugLevel > 4) {
           errs() << "\n; *****";
           errs() << "\n; For LLVM instruction:\n;";
           R.Origin->print(errs());
-          errs() << "\n; Generating replacement:\n";
+          errs() << "\n; Looking for a replacement for:\n";
           ReplacementContext Context;
           PrintReplacementLHS(errs(), R.BPCs, R.PCs, R.Mapping.LHS, Context);
         }
         AddToCandidateMap(CandMap, R);
       }
     }
-
 
     for (auto &Cand : CandMap) {
 
@@ -401,16 +404,26 @@ public:
         errs() << "\n";
       }
 
-      if (DebugLevel > 1)
+      if (DebugLevel > 1) {
         errs() << "#########################################################\n";
+        errs() << "; exiting Souper's runOnFunction() for " << FunctionName << "()\n";
+      }
 
       return true;
     }
 
+    if (DebugLevel > 1) {
+      errs() << "#########################################################\n";
+      errs() << "; exiting Souper's runOnFunction() for " << FunctionName << "()\n";
+    }
     return false;
   }
 
   bool runOnModule(Module &M) {
+    if (DebugLevel > 3)
+      errs() << "\nEntering the Souper pass's runOnModule()\n\n";
+    if (Verify && verifyModule(M, &errs()))
+      llvm::report_fatal_error("module broken before Souper");
     bool Changed = false;
     // get the list first since the dynamic profiling adds functions as it goes
     std::vector<Function *> FL;
@@ -425,6 +438,10 @@ public:
           errs() << "rescanning function after transformation was applied\n";
       }
     }
+    
+    if (Verify && verifyModule(M, &errs()))
+      llvm::report_fatal_error("module broken after (and probably by) Souper");
+
     if (DebugLevel > 1){
       errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";

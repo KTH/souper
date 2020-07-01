@@ -20,11 +20,20 @@
 #include "souper/Infer/Pruning.h"
 #include "souper/Inst/InstGraph.h"
 #include "souper/Parser/Parser.h"
-#include "souper/Tool/GetSolverFromArgs.h"
+#include "souper/Tool/GetSolver.h"
 #include "souper/Util/DfaUtils.h"
 
 using namespace llvm;
 using namespace souper;
+
+unsigned DebugLevel;
+
+static cl::opt<unsigned, /*ExternalStorage=*/true>
+DebugFlagParser("souper-debug-level",
+     cl::desc("Control the verbose level of debug output (default=1). "
+     "The larger the number is, the more fine-grained debug "
+     "information will be printed."),
+     cl::location(DebugLevel), cl::init(1));
 
 static cl::opt<std::string>
 InputFilename(cl::Positional, cl::desc("<input souper optimization>"),
@@ -361,14 +370,10 @@ int SolveInst(const MemoryBufferRef &MB, Solver *S) {
 int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv);
   KVStore *KV = 0;
+
   std::unique_ptr<Solver> S = 0;
-  if (!ParseOnly && !ParseLHSOnly) {
-    S = GetSolverFromArgs(KV);
-    if (!S) {
-      llvm::errs() << "Specify a solver\n";
-      return 1;
-    }
-  }
+  if (!ParseOnly && !ParseLHSOnly)
+    S = GetSolver(KV);
 
   auto MB = MemoryBuffer::getFileOrSTDIN(InputFilename);
   if (!MB) {
