@@ -95,6 +95,10 @@ static const bool DynamicProfileAll = true;
 static const bool DynamicProfileAll = false;
 #endif
 
+
+static std::string nametext = "";
+
+
 struct SouperPass : public ModulePass {
   static char ID;
 
@@ -290,14 +294,32 @@ public:
       if (RHSs.empty())
         continue;
 
-      Cand.Mapping.RHS = RHSs.front();
-
       Instruction *I = Cand.Origin;
       assert(Cand.Mapping.LHS->hasOrigin(I));
       IRBuilder<> Builder(I);
 
-      Value *NewVal = getValue(Cand.Mapping.RHS, I, EBC, DT,
+
+      std::vector<Inst *>::iterator it = RHSs.begin();
+
+      Cand.Mapping.RHS = nullptr;
+
+      Value *NewVal = nullptr;
+
+      // TODO Open an issue in Souper
+      // TODO Fill a cache with all valid RHSs
+      while(!NewVal){
+        Cand.Mapping.RHS = *it;
+        NewVal = getValue(Cand.Mapping.RHS, I, EBC, DT,
                                ReplacedValues, Builder, F->getParent());
+
+        it++;
+        if(it == RHSs.end()){
+
+          if (DebugLevel > 1)
+            errs() << "\"\n; No valid RHS in the list\n"; 
+          break;
+        }
+      }
 
       // if LHS comes from use, then NewVal should be a constant
       assert(Cand.Mapping.LHS->HarvestKind != HarvestType::HarvestedFromUse ||
@@ -309,6 +331,12 @@ public:
           errs() << "\"\n; replacement failed\n";
         continue;
       }
+
+
+      // here we finally commit to having a viable replacement
+
+      if (DebugLevel > 1)
+        errs() << "#########################################################\n";
 
       if (!SouperSubset.empty()) {
           std::string subset = SouperSubset;
@@ -322,11 +350,6 @@ public:
             continue;
           }
       }
-
-      // here we finally commit to having a viable replacement
-
-      if (DebugLevel > 1)
-        errs() << "#########################################################\n";
 
       if (ReplacementIdx < FirstReplace || ReplacementIdx > LastReplace) {
         if (DebugLevel > 1)
@@ -438,7 +461,7 @@ public:
           errs() << "rescanning function after transformation was applied\n";
       }
     }
-    
+
     if (Verify && verifyModule(M, &errs()))
       llvm::report_fatal_error("module broken after (and probably by) Souper");
 

@@ -304,13 +304,13 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
         // PRUNE: never useful to cmp, sub, and, or, xor, div, rem,
         // usub.sat, ssub.sat, ashr, lshr a value against itself
         // Also do it for sub.overflow -- no sense to check for overflow when results = 0
-        if ((*I == *J) && (Inst::isCmp(K) || K == Inst::And || K == Inst::Or ||
+        /*if ((*I == *J) && (Inst::isCmp(K) || K == Inst::And || K == Inst::Or ||
                            K == Inst::Xor || K == Inst::Sub || K == Inst::UDiv ||
                            K == Inst::SDiv || K == Inst::SRem || K == Inst::URem ||
                            K == Inst::USubSat || K == Inst::SSubSat ||
                            K == Inst::AShr || K == Inst::LShr || K == Inst::SSubWithOverflow ||
                            K == Inst::USubWithOverflow || K == Inst::SSubO || K == Inst::USubO))
-          continue;
+          continue;*/
 
         // PRUNE: never operate on two constants
         if ((*I)->K == Inst::ReservedConst && (*J)->K == Inst::ReservedConst)

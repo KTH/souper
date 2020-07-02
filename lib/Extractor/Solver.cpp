@@ -413,7 +413,7 @@ public:
     } else {
       EnumerativeSynthesis ES;
       EC = ES.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHSs,
-                         AllowMultipleRHSs, IC, Timeout);
+                         /*AllowMultipleRHSs = */true, IC, Timeout);
       if (EC || !RHSs.empty())
         return EC;
     }
