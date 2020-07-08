@@ -42,6 +42,7 @@
 #include "souper/Codegen/Codegen.h"
 #include "souper/Tool/GetSolver.h"
 #include "souper/Tool/CandidateMapUtils.h"
+#include "souper/Inst/Inst.h"
 #include "set"
 
 STATISTIC(InstructionReplaced, "Number of instructions replaced by another instruction");
@@ -304,9 +305,40 @@ public:
       Cand.Mapping.RHS = nullptr;
 
       Value *NewVal = nullptr;
+      
+      if(CountValid){
+        ReplacementContext Context;
 
-      // TODO Open an issue in Souper
-      // TODO Fill a cache with all valid RHSs
+        // Save all RHSs in the cache for later usage in CROW
+        std::string LHSStr = GetReplacementLHSString(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,Context);
+        std::string RHSStr;
+        while(it != RHSs.end()){
+          Cand.Mapping.RHS = *it;
+
+          std::string S;
+          RHSStr = GetReplacementRHSString(Cand.Mapping.RHS, Context);
+          if(KV->hGet(LHSStr, "result", S)){
+            S = S + "\n##\n" + RHSStr;
+          }
+          else{
+            S = RHSStr;
+          }
+
+          KV->hSet(LHSStr, "result", S);
+          
+
+          it++;
+        }
+
+        
+        if (DebugLevel > 1)
+          errs() << "\n; CROW populating...\n";
+        continue;
+      }
+
+      it = RHSs.begin();
+      NewVal = nullptr;
+
       while(!NewVal){
         Cand.Mapping.RHS = *it;
         NewVal = getValue(Cand.Mapping.RHS, I, EBC, DT,
@@ -314,7 +346,6 @@ public:
 
         it++;
         if(it == RHSs.end()){
-
           if (DebugLevel > 1)
             errs() << "\"\n; No valid RHS in the list\n"; 
           break;
