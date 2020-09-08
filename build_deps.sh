@@ -23,9 +23,9 @@ ncpus=$(command nproc 2>/dev/null || command sysctl -n hw.ncpu 2>/dev/null || ec
 
 # hiredis version 0.14.0
 hiredis_commit=685030652cd98c5414ce554ff5b356dfe8437870
-llvm_repo=https://github.com/regehr/llvm-project.git
+llvm_repo=https://github.com/Jacarte/llvm-project.git
 # llvm_commit specifies the git branch or hash to checkout to
-llvm_commit=disable-peepholes-v03
+llvm_commit=peephole-disabling-v4
 klee_repo=https://github.com/rsas/klee
 klee_branch=pure-bv-qf-llvm-7.0
 alive_commit=92ad3f5f2f963ef5bd43f71a4137427bd6cce51b
@@ -58,6 +58,7 @@ alive_builddir=$(pwd)/third_party/alive2-build
 mkdir -p $alivedir $alive_builddir
 git clone $alive_repo $alivedir
 git -C $alivedir checkout $alive_commit
+export MAKE_CXX_STANDARD=14
 
 if [ -n "`which ninja`" ] ; then
   (cd $alive_builddir && cmake ../alive2 -DZ3_LIBRARIES=$z3_installdir/lib/$Z3_SHAREDLIB -DZ3_INCLUDE_DIR=$z3_installdir/include -DCMAKE_BUILD_TYPE=$llvm_build_type -GNinja)
@@ -71,19 +72,19 @@ llvm_srcdir=$(pwd)/third_party/llvm-project
 llvm_builddir=$(pwd)/third_party/llvm-${llvm_build_type}-build
 llvm_installdir=$(pwd)/third_party/llvm-${llvm_build_type}-install
 
-mkdir -p $llvm_srcdir
-(cd $llvm_srcdir && git init && git remote add origin $llvm_repo && git fetch origin $llvm_commit && git reset --hard FETCH_HEAD)
+#mkdir -p $llvm_srcdir
+(git clone $llvm_repo $llvm_srcdir && cd $llvm_srcdir && git fetch && git checkout $llvm_commit && git pull)
 
 mkdir -p $llvm_builddir
 
-cmake_flags="-DCMAKE_INSTALL_PREFIX=$llvm_installdir -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_FORCE_ENABLE_STATS=ON -DCMAKE_BUILD_TYPE=$llvm_build_type -DLLVM_ENABLE_Z3_SOLVER=OFF -DLLVM_ENABLE_PROJECTS=\'llvm;clang;compiler-rt\'"
+cmake_flags="-DCMAKE_INSTALL_PREFIX=$llvm_installdir -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_FORCE_ENABLE_STATS=ON -DCMAKE_BUILD_TYPE=$llvm_build_type -DLLVM_ENABLE_Z3_SOLVER=OFF -DLLVM_TARGETS_TO_BUILD=WebAssembly  -DLLVM_ENABLE_PROJECTS=\'clang-tools-extra;lld;llvm;clang;compiler-rt\'"
 
 if [ -n "`which ninja`" ] ; then
-  (cd $llvm_builddir && cmake ${llvm_srcdir}/llvm -G Ninja $cmake_flags -DCMAKE_CXX_FLAGS="-DDISABLE_WRONG_OPTIMIZATIONS_DEFAULT_VALUE=true -DDISABLE_PEEPHOLES_DEFAULT_VALUE=false" "$@")
+  (cd $llvm_builddir && cmake ${llvm_srcdir}/llvm -G Ninja $cmake_flags -DCMAKE_CXX_FLAGS="-DDISABLE_WRONG_OPTIMIZATIONS_DEFAULT_VALUE=true -DDISABLE_PEEPHOLES_DEFAULT_VALUE=true" "$@")
   ninja -C $llvm_builddir
   ninja -C $llvm_builddir install
 else
-  (cd $llvm_builddir && cmake $cmake_flags -DCMAKE_CXX_FLAGS="-DDISABLE_WRONG_OPTIMIZATIONS_DEFAULT_VALUE=true -DDISABLE_PEEPHOLES_DEFAULT_VALUE=false" "$@")
+  (cd $llvm_builddir && cmake $cmake_flags -DCMAKE_CXX_FLAGS="-DDISABLE_WRONG_OPTIMIZATIONS_DEFAULT_VALUE=true -DDISABLE_PEEPHOLES_DEFAULT_VALUE=true" "$@")
   make -C $llvm_builddir -j $ncpus
   make -C $llvm_builddir -j $ncpus install
 fi
