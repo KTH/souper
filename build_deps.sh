@@ -58,6 +58,7 @@ alive_builddir=$(pwd)/third_party/alive2-build
 mkdir -p $alivedir $alive_builddir
 git clone $alive_repo $alivedir
 git -C $alivedir checkout $alive_commit
+export MAKE_CXX_STANDARD=14
 
 if [ -n "`which ninja`" ] ; then
   (cd $alive_builddir && cmake ../alive2 -DZ3_LIBRARIES=$z3_installdir/lib/$Z3_SHAREDLIB -DZ3_INCLUDE_DIR=$z3_installdir/include -DCMAKE_BUILD_TYPE=$llvm_build_type -GNinja)
@@ -71,8 +72,8 @@ llvm_srcdir=$(pwd)/third_party/llvm-project
 llvm_builddir=$(pwd)/third_party/llvm-${llvm_build_type}-build
 llvm_installdir=$(pwd)/third_party/llvm-${llvm_build_type}-install
 
-mkdir -p $llvm_srcdir
-(cd $llvm_srcdir && git init && git remote add origin $llvm_repo && git pull origin $llvm_commit)
+#mkdir -p $llvm_srcdir
+(git clone $llvm_repo $llvm_srcdir && cd $llvm_srcdir && git fetch && git checkout $llvm_commit && git pull)
 
 mkdir -p $llvm_builddir
 

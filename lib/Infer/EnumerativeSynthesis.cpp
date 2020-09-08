@@ -668,7 +668,7 @@ std::error_code isConcreteCandidateSat(SynthesisContext &SC, Inst *RHSGuess, boo
   std::string Query2 = BuildQuery(SC.IC, SC.BPCs, SC.PCs, Mapping, 0, 0);
 
   EC = SC.SMTSolver->isSatisfiable(Query2, IsSat, 0, 0, SC.Timeout);
-  if (EC && DebugLevel > 1) {
+  if (EC && DebugLevel > 2) {
     llvm::errs() << "verification query failed!\n";
   }
   return EC;

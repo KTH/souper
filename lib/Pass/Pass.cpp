@@ -44,6 +44,9 @@
 #include "souper/Tool/CandidateMapUtils.h"
 #include "souper/Inst/Inst.h"
 #include "set"
+#include <sys/socket.h> 
+#include <netinet/in.h> 
+#include <arpa/inet.h>
 
 STATISTIC(InstructionReplaced, "Number of instructions replaced by another instruction");
 STATISTIC(DominanceCheckFailed, "Number of failed replacement due to dominance check");
@@ -78,6 +81,14 @@ static cl::opt<unsigned> FirstReplace("souper-first-opt", cl::Hidden,
     cl::init(0),
     cl::desc("First Souper optimization to perform (default=0)"));
 
+static cl::opt<unsigned> CROWWorkers("souper-crow-workers", cl::Hidden,
+    cl::init(1),
+    cl::desc("Number of paralleling inferring to get valid replacements"));
+
+static cl::opt<unsigned> CROWPort("souper-crow-port", cl::Hidden,
+    cl::init(56789),
+    cl::desc("CROW socket port"));
+
 static cl::opt<unsigned> LastReplace("souper-last-opt", cl::Hidden,
     cl::init(std::numeric_limits<unsigned>::max()),
     cl::desc("Last Souper optimization to perform (default=infinite)"));
@@ -97,8 +108,80 @@ static const bool DynamicProfileAll = false;
 #endif
 
 
-static std::string nametext = "";
 
+#ifdef __APPLE__
+#include <dispatch/dispatch.h>
+#else
+#include <semaphore.h>
+#endif
+
+struct rk_sema {
+#ifdef __APPLE__
+    dispatch_semaphore_t    sem;
+#else
+    sem_t                   sem;
+#endif
+};
+
+
+static inline void
+rk_sema_init(struct rk_sema *s, uint32_t value)
+{
+#ifdef __APPLE__
+    dispatch_semaphore_t *sem = &s->sem;
+
+    *sem = dispatch_semaphore_create(value);
+#else
+    sem_init(&s->sem, 1, value);
+#endif
+}
+
+
+static inline void
+rk_sema_destroy(struct rk_sema *s)
+{
+#ifdef __APPLE__
+    dispatch_semaphore_t *sem = &s->sem;
+
+    dispatch_release(*sem);
+#else
+    sem_destroy(&s->sem, 1, value);
+#endif
+}
+static inline void
+rk_sema_wait(struct rk_sema *s)
+{
+
+#ifdef __APPLE__
+    dispatch_semaphore_wait(s->sem, DISPATCH_TIME_FOREVER);
+#else
+    int r;
+
+    do {
+            r = sem_wait(&s->sem);
+    } while (r == -1 && errno == EINTR);
+#endif
+}
+
+static inline void
+rk_sema_post(struct rk_sema *s)
+{
+
+#ifdef __APPLE__
+    dispatch_semaphore_signal(s->sem);
+#else
+    sem_post(&s->sem);
+#endif
+}
+
+
+static std::string nametext = "";
+static rk_sema mutex;
+static rk_sema save_lock;
+
+    
+const char * addressIp = "127.0.0.1";
+static int sockfd = -1;
 
 struct SouperPass : public ModulePass {
   static char ID;
@@ -209,6 +292,8 @@ public:
   }
 
   bool runOnFunction(Function *F) {
+    initSemaphore();
+
     std::string FunctionName;
     if (F->hasLocalLinkage()) {
       FunctionName =
@@ -264,9 +349,38 @@ public:
       }
     }
 
-    for (auto &Cand : CandMap) {
+    pid_t parent_id = getpid();
+    pid_t pid = -1;
+    pid_t wpid;
+    int status = 0;
+    
+
+    errs() << CandMap.size() << " Candidates\n";
+    for (auto &CandCopy : CandMap) {
 
       ++TotalCandidates;
+      
+      // if CountValid then fork looking the semaphore
+
+      if(CountValid && parent_id == getpid()) // TODO check semaphore
+      {
+          if(CountValid && DebugLevel > 2)
+            errs() << "\tWaiting semaphore \n";
+          rk_sema_wait(&mutex); // wait for the semaphore
+
+          if(CountValid && DebugLevel > 2)
+            errs() << "\tSemaphore granted \n";
+          pid = fork();
+      }
+
+      if(pid > 0){
+        continue;
+      }
+
+      auto Cand = CandCopy;     
+      if(CountValid && DebugLevel > 2)
+        errs() << "Forking inferring process \n";
+
       if (StaticProfile) {
         std::string Str;
         llvm::raw_string_ostream Loc(Str);
@@ -282,6 +396,9 @@ public:
         continue;
       }
       std::vector<Inst *> RHSs;
+
+      if(CountValid && DebugLevel > 1)
+        errs() << "Validating replacement\n";
       if (std::error_code EC =
           S->infer(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,
                    RHSs, /*AllowMultipleRHSs=*/true, IC)) {
@@ -295,6 +412,7 @@ public:
       if (RHSs.empty())
         continue;
 
+
       Instruction *I = Cand.Origin;
       assert(Cand.Mapping.LHS->hasOrigin(I));
       IRBuilder<> Builder(I);
@@ -306,6 +424,9 @@ public:
 
       Value *NewVal = nullptr;
       
+      if(CountValid && DebugLevel > 1)
+        errs() << "Saving replacements\n";
+
       if(CountValid){
         ReplacementContext Context;
 
@@ -317,15 +438,32 @@ public:
 
           std::string S;
           RHSStr = GetReplacementRHSString(Cand.Mapping.RHS, Context);
-          if(KV->hGet(LHSStr, "result", S)){
+
+          std::string keyValuePair = "{\"key\": \"" +  LHSStr;
+          keyValuePair = keyValuePair + "\", \"value\": \"" + RHSStr;
+          keyValuePair = keyValuePair +  + "\"},";
+
+          // TODO send tirough socket
+          
+          if(sockfd >= 0){
+            if(CountValid && DebugLevel > 2)
+              errs() << "Sending data through socket\n";
+            send(sockfd , keyValuePair.data(), keyValuePair.size() , 0 );
+          }
+
+          //rk_sema_wait(&save_lock); 
+
+          /*if(KV->hGet(LHSStr, "result", S)){
             S = S + "\n##\n" + RHSStr;
           }
           else{
             S = RHSStr;
           }
 
-          KV->hSet(LHSStr, "result", S);
-          
+          KV->hSet(LHSStr, "result", S);*/
+          //
+          //rk_sema_post(&save_lock); 
+          // TODO open lock
 
           it++;
         }
@@ -333,7 +471,9 @@ public:
         
         if (DebugLevel > 1)
           errs() << "\n; CROW populating...\n";
-        continue;
+
+        rk_sema_post(&mutex); 
+        exit(0);
       }
 
       it = RHSs.begin();
@@ -463,17 +603,66 @@ public:
         errs() << "; exiting Souper's runOnFunction() for " << FunctionName << "()\n";
       }
 
+      destroySemaphore();
       return true;
+    }
+
+    if(CountValid && pid > 0) // is the parent process
+    {
+       if(CountValid && DebugLevel > 1)
+          errs() << "Waiting for childrens...\n";
+
+       while ((wpid = wait(&status)) > 0); // this way, the father waits for all the child processes 
+
+       destroySemaphore();
+
+       return false;
     }
 
     if (DebugLevel > 1) {
       errs() << "#########################################################\n";
       errs() << "; exiting Souper's runOnFunction() for " << FunctionName << "()\n";
     }
+
+    destroySemaphore();
+
     return false;
   }
 
+  int initSemaphore(){
+    if (DebugLevel > 1)
+      errs() << "\nInitiliazing semaphore\n\n";
+
+    rk_sema_init(&mutex, CROWWorkers); 
+    return 0;
+  }
+
+  int destroySemaphore(){
+    if (DebugLevel > 1)
+      errs() << "\nDestroying semaphore\n\n";
+      //rk_sema_destroy(&mutex); 
+      
+    return 0;
+  }
+
   bool runOnModule(Module &M) {
+
+    if(CountValid){
+
+      errs() << "Opening socket server\n";
+      struct sockaddr_in address; 
+      int opt = 1;
+
+      address.sin_family = AF_INET; 
+      address.sin_port = htons(CROWPort);
+
+      inet_pton(AF_INET, addressIp, &address.sin_addr);
+
+      sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+      connect(sockfd, (struct sockaddr *)&address, sizeof(address));
+    }
+
     if (DebugLevel > 3)
       errs() << "\nEntering the Souper pass's runOnModule()\n\n";
     if (Verify && verifyModule(M, &errs()))
@@ -502,7 +691,7 @@ public:
     }
     if(CountValid)
       errs() << "[" << nametext << "/" << TotalCandidates <<"]\n";
-      
+    
     return Changed;
   }
 
