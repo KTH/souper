@@ -24,13 +24,11 @@
 #include <functional>
 #include <set>
 
-static const unsigned MaxTries = 20000;
-static const unsigned MaxInputSpecializationTries = 40;
 
 
 //static const unsigned MaxLHSCands = 200000;
 
-// static const unsigned MaxTries = 30;
+static const unsigned MaxTries = 30;
 // static const unsigned MaxInputSpecializationTries = 2;
 
 bool UseAlive;
@@ -76,6 +74,10 @@ namespace {
   static cl::opt<unsigned> MaxV("souper-enumerative-synthesis-max-verification-load",
     cl::desc("Maximum number of guesses verified at once (default=300)."),
     cl::init(300));
+
+  static cl::opt<unsigned> MaxRHS("souper-enumerative-synthesis-max-rhs",
+    cl::desc("Maximum number of RHS."),
+    cl::init(30));
   static cl::opt<bool, /*ExternalStorage=*/true>
     AliveFlagParser("souper-use-alive", cl::desc("Use Alive2 as the backend"),
     cl::Hidden, cl::location(UseAlive), cl::init(false));
@@ -304,13 +306,11 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
         // PRUNE: never useful to cmp, sub, and, or, xor, div, rem,
         // usub.sat, ssub.sat, ashr, lshr a value against itself
         // Also do it for sub.overflow -- no sense to check for overflow when results = 0
-        if ((*I == *J) && (Inst::isCmp(K) || K == Inst::And || K == Inst::Or ||
-                           K == Inst::Xor || K == Inst::Sub || K == Inst::UDiv ||
-                           K == Inst::SDiv || K == Inst::SRem || K == Inst::URem ||
+        /*if ((*I == *J) && (Inst::isCmp(K) ||  K == Inst::Or ||
                            K == Inst::USubSat || K == Inst::SSubSat ||
-                           K == Inst::AShr || K == Inst::LShr || K == Inst::SSubWithOverflow ||
+                           K == Inst::AShr || K == Inst::LShr || 
                            K == Inst::USubWithOverflow || K == Inst::SSubO || K == Inst::USubO))
-          continue;
+          continue;*/
 
         // PRUNE: never operate on two constants
         if ((*I)->K == Inst::ReservedConst && (*J)->K == Inst::ReservedConst)
@@ -668,7 +668,7 @@ std::error_code isConcreteCandidateSat(SynthesisContext &SC, Inst *RHSGuess, boo
   std::string Query2 = BuildQuery(SC.IC, SC.BPCs, SC.PCs, Mapping, 0, 0);
 
   EC = SC.SMTSolver->isSatisfiable(Query2, IsSat, 0, 0, SC.Timeout);
-  if (EC && DebugLevel > 1) {
+  if (EC && DebugLevel > 2) {
     llvm::errs() << "verification query failed!\n";
   }
   return EC;
@@ -768,6 +768,7 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
     
     if (RHS) {
       RHSs.emplace_back(RHS);
+
       if (!SC.CheckAllGuesses)
         return EC;
       if (DebugLevel > 3) {
@@ -775,6 +776,7 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
         ReplacementContext RC;
         RC.printInst(RHS, llvm::outs(), true);
         llvm::outs() << "\n";
+
       }
     }
   }
