@@ -651,7 +651,6 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, std::vector<Inst *> &R
     assert (RHS);
     RHSs.emplace_back(RHS);
     ReplacementContext RC;
-    // CROW TODO send back to CROW
 
     if(CROW){
         CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
@@ -811,7 +810,6 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
               errs() << "There is no communication with the CROW server\n";
         }
       }
-      // CROW TODO, send back to CROW the replacement and the key
 
       if (!SC.CheckAllGuesses && !CROW)
         return EC;

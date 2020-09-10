@@ -150,6 +150,7 @@ namespace souper {
 
             if(DebugLevel > 1)
                 errs() << "Socket broken!\n";
+            opened = false;
             return 0;
         }
 
@@ -174,7 +175,6 @@ namespace souper {
                     errs() << "Socket broken errno:" << error_code << "\n";
 
                 if(!reconnect()){
-                    opened = false;
                     return;
                 }
                 

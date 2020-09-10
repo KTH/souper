@@ -16,11 +16,13 @@
 #include "llvm/Support/raw_ostream.h"
 #include "souper/Extractor/ExprBuilder.h"
 #include "souper/Infer/InstSynthesis.h"
+#include "souper/Crow/Crow.h"
 
 #include <queue>
 
 using namespace souper;
 using namespace llvm;
+extern bool CROW;
 
 namespace {
 
@@ -161,6 +163,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     // -------------- Counterexample driven synthesis loop ----------------------
     // --------------------------------------------------------------------------
     unsigned Refinements = 0;
+
     while (true) {
       Inst *Query = TrueConst;
       // Put each set of concrete inputs into a separate copy of the WiringQuery
@@ -251,6 +254,29 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                        << "\n";
         }
         RHS = Cand;
+        ReplacementContext RC;
+
+        if(CROW){
+          CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+          if(bridge->isOpen()){
+
+            std::string RHString;
+            llvm::raw_string_ostream SS(RHString);
+
+
+            std::string S;
+            llvm::raw_string_ostream SS1(S);
+
+            PrintReplacementLHS(SS1, BPCs, PCs, LHS, Context);
+            PrintReplacementRHS(SS, RHS, RC, true);
+            bridge->sendKVPair(S, RHString);
+          }
+          else{
+            if(DebugLevel > 1)
+                errs() << "There is no communication with the CROW server\n";
+          }
+
+        }
         // CROW TODO send back to CROW and conitnue until stop
         return EC;
       }
