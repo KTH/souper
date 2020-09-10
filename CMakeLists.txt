@@ -156,6 +156,11 @@ add_library(souperClangTool STATIC
   ${SOUPER_CLANG_TOOL_FILES}
 )
 
+set(SOUPER_CROW_FILES
+  lib/Crow/Crow.cpp
+  include/souper/Crow/Crow.h
+)
+
 set(SOUPER_EXTRACTOR_FILES
   lib/Extractor/Candidates.cpp
   lib/Extractor/ExprBuilder.cpp
@@ -196,6 +201,7 @@ set(SOUPER_INFER_FILES
 )
 
 add_library(souperInfer STATIC
+  ${SOUPER_CROW_FILES}
   ${SOUPER_INFER_FILES}
 )
 
@@ -206,6 +212,7 @@ set(SOUPER_INST_FILES
 )
 
 add_library(souperInst STATIC
+  ${SOUPER_CROW_FILES}
   ${SOUPER_INST_FILES}
 )
 
@@ -215,6 +222,7 @@ set(SOUPER_PARSER_FILES
 )
 
 add_library(souperParser STATIC
+  ${SOUPER_CROW_FILES}
   ${SOUPER_PARSER_FILES}
 )
 
@@ -238,13 +246,10 @@ add_library(souperTool STATIC
   ${SOUPER_TOOL_FILES}
 )
 
-set(SOUPER_CROW_FILES
-  lib/Crow/Crow.cpp
-  include/souper/Crow/Crow.h
-)
 
 
 set(SOUPER_SOURCES
+  ${SOUPER_CROW_FILES}
   ${SOUPER_EXTRACTOR_FILES}
   ${SOUPER_INST_FILES}
   ${SOUPER_KVSTORE_FILES}
@@ -261,14 +266,12 @@ set(SOUPER_CODEGEN_FILES
 add_library(souperPass SHARED
   ${KLEE_EXPR_FILES}
   ${SOUPER_SOURCES}  
-  ${SOUPER_CROW_FILES}
   lib/Pass/Pass.cpp
 )
 
 add_library(souperPassProfileAll SHARED
   ${KLEE_EXPR_FILES}
   ${SOUPER_SOURCES}  
-  ${SOUPER_CROW_FILES}
   lib/Pass/Pass.cpp
 )
 

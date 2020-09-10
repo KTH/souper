@@ -251,6 +251,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                        << "\n";
         }
         RHS = Cand;
+        // CROW TODO send back to CROW and conitnue until stop
         return EC;
       }
 

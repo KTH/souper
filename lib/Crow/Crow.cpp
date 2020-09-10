@@ -19,8 +19,8 @@ namespace souper {
         cl::desc("CROW socket port"));
 
 
-    static cl::opt<bool> CountValid("souper-valid-count", cl::init(false),
-        cl::desc("Count valid replacements"));
+    static cl::opt<bool> CROW("souper-crow", cl::init(false),
+        cl::desc("Get all possible replacements for randomization with CROW"));
 
     static llvm::cl::opt<std::string> SouperSubset(
         "souper-subset", cl::Hidden,

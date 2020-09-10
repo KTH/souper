@@ -54,7 +54,7 @@ using namespace souper;
 using namespace llvm;
 
 unsigned DebugLevel;
-extern unsigned CountValid;
+extern bool CROW;
 extern unsigned CROWWorkers;
 extern std::string SouperSubset;
 
@@ -75,6 +75,10 @@ static cl::opt<bool> Verify("souper-verify", cl::init(false),
 
 static cl::opt<bool> DynamicProfile("souper-dynamic-profile", cl::init(false),
     cl::desc("Dynamic profiling of Souper optimizations (default=false)"));
+
+
+static cl::opt<bool> AllowMultipleRHSs("souper-allow-multiple-rhs", cl::init(true),
+    cl::desc("Set Souper looks and validates for more than one replacement"));
 
 static cl::opt<bool> StaticProfile("souper-static-profile", cl::init(false),
     cl::desc("Static profiling of Souper optimizations (default=false)"));
@@ -278,15 +282,15 @@ public:
 
       ++TotalCandidates;
       
-      // if CountValid then fork looking the semaphore
+      // if CROW then fork looking the semaphore
 
-      if(CountValid && parent_id == getpid()) // TODO check semaphore
+      if(CROW && parent_id == getpid()) // TODO check semaphore
       {
-          if(CountValid && DebugLevel > 2)
+          if(CROW && DebugLevel > 2)
             errs() << "\tWaiting semaphore \n";
           rk_sema_wait(&mutex); // wait for the semaphore
 
-          if(CountValid && DebugLevel > 2)
+          if(CROW && DebugLevel > 2)
             errs() << "\tSemaphore granted \n";
           pid = fork();
       }
@@ -296,7 +300,7 @@ public:
       }
 
       auto Cand = CandCopy;     
-      if(CountValid && DebugLevel > 2)
+      if(CROW && DebugLevel > 2)
         errs() << "Forking inferring process \n";
 
       if (StaticProfile) {
@@ -315,11 +319,11 @@ public:
       }
       std::vector<Inst *> RHSs;
 
-      if(CountValid && DebugLevel > 1)
+      if(CROW && DebugLevel > 1)
         errs() << "Validating replacement\n";
       if (std::error_code EC =
           S->infer(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,
-                   RHSs, /*AllowMultipleRHSs=*/true, IC)) {
+                   RHSs, AllowMultipleRHSs, IC)) {
         if (EC == std::errc::timed_out ||
             EC == std::errc::value_too_large) {
           continue;
@@ -342,10 +346,10 @@ public:
 
       Value *NewVal = nullptr;
       
-      if(CountValid && DebugLevel > 1)
+      if(CROW && DebugLevel > 1)
         errs() << "Saving replacements\n";
 
-      if(CountValid){
+      if(CROW){
         ReplacementContext Context;
 
         // Save all RHSs in the cache for later usage in CROW
@@ -360,9 +364,9 @@ public:
 
           // TODO send tirough socket
           CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
-          if(bridge->isOpen()){
-            bridge->sendKVPair(LHSStr, RHSStr);
-          }
+          //if(bridge->isOpen()){
+          //  bridge->sendKVPair(LHSStr, RHSStr);
+          //}
 
           it++;
         }
@@ -460,7 +464,7 @@ public:
         errs() << "\"\n";
       }
 
-      if (CountValid){
+      if (CROW){
         errs() << "\n[SLUMPS-META replacement idx " << ReplacementIdx - 1 << "]\n";
         
         nametext = nametext + "," + std::to_string(ReplacementIdx - 1);
@@ -506,9 +510,9 @@ public:
       return true;
     }
 
-    if(CountValid && pid > 0) // is the parent process
+    if(CROW && pid > 0) // is the parent process
     {
-       if(CountValid && DebugLevel > 1)
+       if(CROW && DebugLevel > 1)
           errs() << "Waiting for childrens...\n";
 
        while ((wpid = wait(&status)) > 0); // this way, the father waits for all the child processes 
@@ -546,7 +550,7 @@ public:
 
   bool runOnModule(Module &M) {
 
-    if(CountValid){
+    if(CROW){
       CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
       bridge->init();
     }
@@ -577,7 +581,7 @@ public:
       errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
-    if(CountValid)
+    if(CROW)
       errs() << "[" << nametext << "/" << TotalCandidates <<"]\n";
     
     return Changed;

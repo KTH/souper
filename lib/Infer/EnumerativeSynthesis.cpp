@@ -19,6 +19,7 @@
 #include "souper/Infer/ConstantSynthesis.h"
 #include "souper/Infer/EnumerativeSynthesis.h"
 #include "souper/Infer/Pruning.h"
+#include "souper/Crow/Crow.h"
 
 #include <queue>
 #include <functional>
@@ -648,9 +649,17 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, std::vector<Inst *> &R
     }
     assert (RHS);
     RHSs.emplace_back(RHS);
+
+
+    // CROW TODO send back to CROW
+
+    //if(CountValid){
+     //   CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+    //}
     if (!SC.CheckAllGuesses) {
       return EC;
     }
+
     if (DebugLevel > 3) {
       llvm::outs() << "; result " << RHSs.size() << ":\n";
       ReplacementContext RC;
@@ -768,6 +777,8 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
     
     if (RHS) {
       RHSs.emplace_back(RHS);
+
+      // CROW TODO, send back to CROW the replacement and the key
 
       if (!SC.CheckAllGuesses)
         return EC;

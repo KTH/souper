@@ -392,7 +392,7 @@ public:
         std::set<Inst*> ConstSet{C};
         ConstantSynthesis CS;
         EC = CS.synthesize(SMTSolver.get(), BPCs, PCs, InstMapping(LHS, C), ConstSet,
-                           ResultMap, IC, /*MaxTries=*/10, Timeout, false);
+                           ResultMap, IC, /*MaxTries=*/3, Timeout, false);
         if (ResultMap.find(C) != ResultMap.end()) {
           RHSs.emplace_back(IC.getConst(ResultMap[C]));
           return std::error_code();
