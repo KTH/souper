@@ -43,10 +43,8 @@
 #include "souper/Tool/GetSolver.h"
 #include "souper/Tool/CandidateMapUtils.h"
 #include "souper/Inst/Inst.h"
-#include "set"
-#include <sys/socket.h> 
-#include <netinet/in.h> 
-#include <arpa/inet.h>
+#include "souper/Crow/Crow.h"
+
 
 STATISTIC(InstructionReplaced, "Number of instructions replaced by another instruction");
 STATISTIC(DominanceCheckFailed, "Number of failed replacement due to dominance check");
@@ -55,6 +53,9 @@ using namespace souper;
 using namespace llvm;
 
 unsigned DebugLevel;
+extern bool CROW;
+extern unsigned CROWWorkers;
+extern std::string SouperSubset;
 
 namespace {
 std::unique_ptr<Solver> S;
@@ -73,6 +74,10 @@ static cl::opt<bool> Verify("souper-verify", cl::init(false),
 
 static cl::opt<bool> DynamicProfile("souper-dynamic-profile", cl::init(false),
     cl::desc("Dynamic profiling of Souper optimizations (default=false)"));
+
+
+static cl::opt<bool> AllowMultipleRHSs("souper-allow-multiple-rhs", cl::init(true),
+    cl::desc("Set Souper looks and validates for more than one replacement"));
 
 static cl::opt<bool> StaticProfile("souper-static-profile", cl::init(false),
     cl::desc("Static profiling of Souper optimizations (default=false)"));
@@ -93,14 +98,6 @@ static cl::opt<unsigned> LastReplace("souper-last-opt", cl::Hidden,
     cl::init(std::numeric_limits<unsigned>::max()),
     cl::desc("Last Souper optimization to perform (default=infinite)"));
 
-
-static cl::opt<bool> CountValid("souper-valid-count", cl::init(false),
-    cl::desc("Count valid replacements"));
-
-static llvm::cl::opt<std::string> SouperSubset(
-    "souper-subset", cl::Hidden,
-    llvm::cl::init(""), llvm::cl::value_desc("Subset to be applied as candidates: 1,3,6"));
-
 #ifdef DYNAMIC_PROFILE_ALL
 static const bool DynamicProfileAll = true;
 #else
@@ -109,79 +106,10 @@ static const bool DynamicProfileAll = false;
 
 
 
-#ifdef __APPLE__
-#include <dispatch/dispatch.h>
-#else
-#include <semaphore.h>
-#endif
-
-struct rk_sema {
-#ifdef __APPLE__
-    dispatch_semaphore_t    sem;
-#else
-    sem_t                   sem;
-#endif
-};
-
-
-static inline void
-rk_sema_init(struct rk_sema *s, uint32_t value)
-{
-#ifdef __APPLE__
-    dispatch_semaphore_t *sem = &s->sem;
-
-    *sem = dispatch_semaphore_create(value);
-#else
-    sem_init(&s->sem, 1, value);
-#endif
-}
-
-
-static inline void
-rk_sema_destroy(struct rk_sema *s)
-{
-#ifdef __APPLE__
-    dispatch_semaphore_t *sem = &s->sem;
-
-    dispatch_release(*sem);
-#else
-    sem_destroy(&s->sem, 1, value);
-#endif
-}
-static inline void
-rk_sema_wait(struct rk_sema *s)
-{
-
-#ifdef __APPLE__
-    dispatch_semaphore_wait(s->sem, DISPATCH_TIME_FOREVER);
-#else
-    int r;
-
-    do {
-            r = sem_wait(&s->sem);
-    } while (r == -1 && errno == EINTR);
-#endif
-}
-
-static inline void
-rk_sema_post(struct rk_sema *s)
-{
-
-#ifdef __APPLE__
-    dispatch_semaphore_signal(s->sem);
-#else
-    sem_post(&s->sem);
-#endif
-}
-
-
 static std::string nametext = "";
 static rk_sema mutex;
 static rk_sema save_lock;
 
-    
-const char * addressIp = "127.0.0.1";
-static int sockfd = -1;
 
 struct SouperPass : public ModulePass {
   static char ID;
@@ -360,15 +288,16 @@ public:
 
       ++TotalCandidates;
       
-      // if CountValid then fork looking the semaphore
+      // if CROW then fork looking the semaphore
 
-      if(CountValid && parent_id == getpid()) // TODO check semaphore
+      if(CROW && parent_id == getpid()) // TODO check semaphore
       {
-          if(CountValid && DebugLevel > 2)
+          if(CROW && DebugLevel > 2)
             errs() << "\tWaiting semaphore \n";
           rk_sema_wait(&mutex); // wait for the semaphore
 
-          if(CountValid && DebugLevel > 2)
+          if(CROW && DebugLevel > 2)
+
             errs() << "\tSemaphore granted \n";
           pid = fork();
       }
@@ -378,7 +307,8 @@ public:
       }
 
       auto Cand = CandCopy;     
-      if(CountValid && DebugLevel > 2)
+      if(CROW && DebugLevel > 2)
+
         errs() << "Forking inferring process \n";
 
       if (StaticProfile) {
@@ -397,11 +327,11 @@ public:
       }
       std::vector<Inst *> RHSs;
 
-      if(CountValid && DebugLevel > 1)
+      if(CROW && DebugLevel > 1)
         errs() << "Validating replacement\n";
       if (std::error_code EC =
           S->infer(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,
-                   RHSs, /*AllowMultipleRHSs=*/true, IC)) {
+                   RHSs, AllowMultipleRHSs, IC)) {
         if (EC == std::errc::timed_out ||
             EC == std::errc::value_too_large) {
           continue;
@@ -412,6 +342,10 @@ public:
       if (RHSs.empty())
         continue;
 
+      if(CROW){
+        rk_sema_post(&mutex);
+        exit(0);
+      }
 
       Instruction *I = Cand.Origin;
       assert(Cand.Mapping.LHS->hasOrigin(I));
@@ -421,63 +355,10 @@ public:
       std::vector<Inst *>::iterator it = RHSs.begin();
 
       Cand.Mapping.RHS = nullptr;
-
       Value *NewVal = nullptr;
-      
-      if(CountValid && DebugLevel > 1)
-        errs() << "Saving replacements\n";
-
-      if(CountValid){
-        ReplacementContext Context;
-
-        // Save all RHSs in the cache for later usage in CROW
-        std::string LHSStr = GetReplacementLHSString(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,Context);
-        std::string RHSStr;
-        while(it != RHSs.end()){
-          Cand.Mapping.RHS = *it;
-
-          std::string S;
-          RHSStr = GetReplacementRHSString(Cand.Mapping.RHS, Context);
-
-          std::string keyValuePair = "{\"key\": \"" +  LHSStr;
-          keyValuePair = keyValuePair + "\", \"value\": \"" + RHSStr;
-          keyValuePair = keyValuePair +  + "\"},";
-
-          // TODO send tirough socket
-          
-          if(sockfd >= 0){
-            if(CountValid && DebugLevel > 2)
-              errs() << "Sending data through socket\n";
-            send(sockfd , keyValuePair.data(), keyValuePair.size() , 0 );
-          }
-
-          //rk_sema_wait(&save_lock); 
-
-          /*if(KV->hGet(LHSStr, "result", S)){
-            S = S + "\n##\n" + RHSStr;
-          }
-          else{
-            S = RHSStr;
-          }
-
-          KV->hSet(LHSStr, "result", S);*/
-          //
-          //rk_sema_post(&save_lock); 
-          // TODO open lock
-
-          it++;
-        }
-
-        
-        if (DebugLevel > 1)
-          errs() << "\n; CROW populating...\n";
-
-        rk_sema_post(&mutex); 
-        exit(0);
-      }
 
       it = RHSs.begin();
-      NewVal = nullptr;
+
 
       while(!NewVal){
         Cand.Mapping.RHS = *it;
@@ -561,7 +442,7 @@ public:
         errs() << "\"\n";
       }
 
-      if (CountValid){
+      if (CROW){
         errs() << "\n[SLUMPS-META replacement idx " << ReplacementIdx - 1 << "]\n";
         
         nametext = nametext + "," + std::to_string(ReplacementIdx - 1);
@@ -607,9 +488,9 @@ public:
       return true;
     }
 
-    if(CountValid && pid > 0) // is the parent process
+    if(CROW && pid > 0) // is the parent process
     {
-       if(CountValid && DebugLevel > 1)
+       if(CROW && DebugLevel > 1)
           errs() << "Waiting for childrens...\n";
 
        while ((wpid = wait(&status)) > 0); // this way, the father waits for all the child processes 
@@ -647,20 +528,10 @@ public:
 
   bool runOnModule(Module &M) {
 
-    if(CountValid){
+    if(CROW){
+      CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+      bridge->init();
 
-      errs() << "Opening socket server\n";
-      struct sockaddr_in address; 
-      int opt = 1;
-
-      address.sin_family = AF_INET; 
-      address.sin_port = htons(CROWPort);
-
-      inet_pton(AF_INET, addressIp, &address.sin_addr);
-
-      sockfd = socket(AF_INET, SOCK_STREAM, 0);
-
-      connect(sockfd, (struct sockaddr *)&address, sizeof(address));
     }
 
     if (DebugLevel > 3)
@@ -685,12 +556,11 @@ public:
     if (Verify && verifyModule(M, &errs()))
       llvm::report_fatal_error("module broken after (and probably by) Souper");
 
-    if (DebugLevel > 1){
+    if (DebugLevel > 1 && !CROW){
       errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
-    if(CountValid)
-      errs() << "[" << nametext << "/" << TotalCandidates <<"]\n";
+
     
     return Changed;
   }

@@ -195,7 +195,15 @@ set(SOUPER_INFER_FILES
   include/souper/Infer/Interpreter.h
 )
 
+
+set(SOUPER_CROW_FILES
+  lib/Crow/Crow.cpp
+  include/souper/Crow/Crow.h
+)
+
+
 add_library(souperInfer STATIC
+  ${SOUPER_CROW_FILES}
   ${SOUPER_INFER_FILES}
 )
 
@@ -215,6 +223,7 @@ set(SOUPER_PARSER_FILES
 )
 
 add_library(souperParser STATIC
+  ${SOUPER_CROW_FILES}
   ${SOUPER_PARSER_FILES}
 )
 
@@ -233,11 +242,13 @@ set(SOUPER_TOOL_FILES
   include/souper/Tool/GetSolver.h.in
 )
 
+
 add_library(souperTool STATIC
   ${SOUPER_TOOL_FILES}
 )
 
 set(SOUPER_SOURCES
+  ${SOUPER_CROW_FILES}
   ${SOUPER_EXTRACTOR_FILES}
   ${SOUPER_INST_FILES}
   ${SOUPER_KVSTORE_FILES}
@@ -253,13 +264,13 @@ set(SOUPER_CODEGEN_FILES
 
 add_library(souperPass SHARED
   ${KLEE_EXPR_FILES}
-  ${SOUPER_SOURCES}
+  ${SOUPER_SOURCES}  
   lib/Pass/Pass.cpp
 )
 
 add_library(souperPassProfileAll SHARED
   ${KLEE_EXPR_FILES}
-  ${SOUPER_SOURCES}
+  ${SOUPER_SOURCES}  
   lib/Pass/Pass.cpp
 )
 
@@ -402,20 +413,7 @@ add_custom_target(check
 # we want assertions even in release mode!
 string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
 
-find_program(GO_EXECUTABLE NAMES go DOC "go executable")
-if(NOT GO_EXECUTABLE STREQUAL "GO_EXECUTABLE-NOTFOUND")
-  add_executable(souperweb-backend
-    tools/souperweb-backend.cpp
-  )
-  set_target_properties(souperweb-backend
-    PROPERTIES COMPILE_FLAGS "${LLVM_CXXFLAGS}")
-  target_include_directories(souperweb-backend PRIVATE "${LLVM_INCLUDEDIR}")
 
-  target_link_libraries(souperweb-backend souperTool souperExtractor souperKVStore souperSMTLIB2 souperParser souperInst ${HIREDIS_LIBRARY})
-
-  add_custom_target(souperweb ALL COMMAND ${GO_EXECUTABLE} build -o ${CMAKE_BINARY_DIR}/souperweb ${CMAKE_SOURCE_DIR}/tools/souperweb.go
-                                  COMMENT "Building souperweb")
-endif()
 
 add_library(profileRuntime STATIC
   runtime/souperPassProfile.c)
