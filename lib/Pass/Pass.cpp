@@ -43,10 +43,9 @@
 #include "souper/Tool/GetSolver.h"
 #include "souper/Tool/CandidateMapUtils.h"
 #include "souper/Inst/Inst.h"
+#include "souper/Crow/Crow.h"
 #include "set"
-#include <sys/socket.h> 
-#include <netinet/in.h> 
-#include <arpa/inet.h>
+
 
 STATISTIC(InstructionReplaced, "Number of instructions replaced by another instruction");
 STATISTIC(DominanceCheckFailed, "Number of failed replacement due to dominance check");
@@ -55,6 +54,9 @@ using namespace souper;
 using namespace llvm;
 
 unsigned DebugLevel;
+extern unsigned CountValid;
+extern unsigned CROWWorkers;
+extern std::string SouperSubset;
 
 namespace {
 std::unique_ptr<Solver> S;
@@ -81,25 +83,9 @@ static cl::opt<unsigned> FirstReplace("souper-first-opt", cl::Hidden,
     cl::init(0),
     cl::desc("First Souper optimization to perform (default=0)"));
 
-static cl::opt<unsigned> CROWWorkers("souper-crow-workers", cl::Hidden,
-    cl::init(1),
-    cl::desc("Number of paralleling inferring to get valid replacements"));
-
-static cl::opt<unsigned> CROWPort("souper-crow-port", cl::Hidden,
-    cl::init(56789),
-    cl::desc("CROW socket port"));
-
 static cl::opt<unsigned> LastReplace("souper-last-opt", cl::Hidden,
     cl::init(std::numeric_limits<unsigned>::max()),
     cl::desc("Last Souper optimization to perform (default=infinite)"));
-
-
-static cl::opt<bool> CountValid("souper-valid-count", cl::init(false),
-    cl::desc("Count valid replacements"));
-
-static llvm::cl::opt<std::string> SouperSubset(
-    "souper-subset", cl::Hidden,
-    llvm::cl::init(""), llvm::cl::value_desc("Subset to be applied as candidates: 1,3,6"));
 
 #ifdef DYNAMIC_PROFILE_ALL
 static const bool DynamicProfileAll = true;
@@ -109,79 +95,11 @@ static const bool DynamicProfileAll = false;
 
 
 
-#ifdef __APPLE__
-#include <dispatch/dispatch.h>
-#else
-#include <semaphore.h>
-#endif
-
-struct rk_sema {
-#ifdef __APPLE__
-    dispatch_semaphore_t    sem;
-#else
-    sem_t                   sem;
-#endif
-};
-
-
-static inline void
-rk_sema_init(struct rk_sema *s, uint32_t value)
-{
-#ifdef __APPLE__
-    dispatch_semaphore_t *sem = &s->sem;
-
-    *sem = dispatch_semaphore_create(value);
-#else
-    sem_init(&s->sem, 1, value);
-#endif
-}
-
-
-static inline void
-rk_sema_destroy(struct rk_sema *s)
-{
-#ifdef __APPLE__
-    dispatch_semaphore_t *sem = &s->sem;
-
-    dispatch_release(*sem);
-#else
-    sem_destroy(&s->sem, 1, value);
-#endif
-}
-static inline void
-rk_sema_wait(struct rk_sema *s)
-{
-
-#ifdef __APPLE__
-    dispatch_semaphore_wait(s->sem, DISPATCH_TIME_FOREVER);
-#else
-    int r;
-
-    do {
-            r = sem_wait(&s->sem);
-    } while (r == -1 && errno == EINTR);
-#endif
-}
-
-static inline void
-rk_sema_post(struct rk_sema *s)
-{
-
-#ifdef __APPLE__
-    dispatch_semaphore_signal(s->sem);
-#else
-    sem_post(&s->sem);
-#endif
-}
-
-
 static std::string nametext = "";
 static rk_sema mutex;
 static rk_sema save_lock;
 
-    
-const char * addressIp = "127.0.0.1";
-static int sockfd = -1;
+
 
 struct SouperPass : public ModulePass {
   static char ID;
@@ -439,31 +357,12 @@ public:
           std::string S;
           RHSStr = GetReplacementRHSString(Cand.Mapping.RHS, Context);
 
-          std::string keyValuePair = "{\"key\": \"" +  LHSStr;
-          keyValuePair = keyValuePair + "\", \"value\": \"" + RHSStr;
-          keyValuePair = keyValuePair +  + "\"},";
 
           // TODO send tirough socket
-          
-          if(sockfd >= 0){
-            if(CountValid && DebugLevel > 2)
-              errs() << "Sending data through socket\n";
-            send(sockfd , keyValuePair.data(), keyValuePair.size() , 0 );
+          CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+          if(bridge->isOpen()){
+            bridge->sendKVPair(LHSStr, RHSStr);
           }
-
-          //rk_sema_wait(&save_lock); 
-
-          /*if(KV->hGet(LHSStr, "result", S)){
-            S = S + "\n##\n" + RHSStr;
-          }
-          else{
-            S = RHSStr;
-          }
-
-          KV->hSet(LHSStr, "result", S);*/
-          //
-          //rk_sema_post(&save_lock); 
-          // TODO open lock
 
           it++;
         }
@@ -472,7 +371,7 @@ public:
         if (DebugLevel > 1)
           errs() << "\n; CROW populating...\n";
 
-        rk_sema_post(&mutex); 
+        rk_sema_post(&mutex);
         exit(0);
       }
 
@@ -648,19 +547,8 @@ public:
   bool runOnModule(Module &M) {
 
     if(CountValid){
-
-      errs() << "Opening socket server\n";
-      struct sockaddr_in address; 
-      int opt = 1;
-
-      address.sin_family = AF_INET; 
-      address.sin_port = htons(CROWPort);
-
-      inet_pton(AF_INET, addressIp, &address.sin_addr);
-
-      sockfd = socket(AF_INET, SOCK_STREAM, 0);
-
-      connect(sockfd, (struct sockaddr *)&address, sizeof(address));
+      CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+      bridge->init();
     }
 
     if (DebugLevel > 3)

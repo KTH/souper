@@ -10,13 +10,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1df1c2f7-a48c-4ecb-bcbb-3b3527c634b4" name="Default Changelist" comment="">
-      <change beforePath="$PROJECT_DIR$/lib/Extractor/Candidates.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/lib/Extractor/Candidates.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/Extractor/Solver.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/lib/Extractor/Solver.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/Infer/AliveDriver.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/lib/Infer/AliveDriver.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/Infer/EnumerativeSynthesis.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/lib/Infer/EnumerativeSynthesis.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/Inst/Inst.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/lib/Inst/Inst.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/Tool/CandidateMapUtils.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/lib/Tool/CandidateMapUtils.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/souper.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tools/souper.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/Pass/Pass.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/lib/Pass/Pass.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -28,10 +25,15 @@
   </component>
   <component name="ProjectId" id="1TQV5thisKGfHYR19go2jZAZh3H" />
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
   <component name="PropertiesComponent">
     <property name="WebServerToolWindowFactoryState" value="false" />
     <property name="cf.advertisement.text.has.clang-format" value="true" />
     <property name="cf.advertisement.text.overridden" value="true" />
+    <property name="cf.first.check.clang-format" value="false" />
     <property name="last_opened_file_path" value="$PROJECT_DIR$" />
   </component>
   <component name="SvnConfiguration">
@@ -47,11 +49,12 @@
       <workItem from="1573392127130" duration="107000" />
       <workItem from="1573392239079" duration="82000" />
       <workItem from="1573392340294" duration="87000" />
+      <workItem from="1599684323324" duration="573000" />
     </task>
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
-    <option name="version" value="1" />
+    <option name="version" value="2" />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
     <option name="TAB_STATES">

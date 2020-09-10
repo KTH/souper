@@ -233,9 +233,16 @@ set(SOUPER_TOOL_FILES
   include/souper/Tool/GetSolver.h.in
 )
 
+
 add_library(souperTool STATIC
   ${SOUPER_TOOL_FILES}
 )
+
+set(SOUPER_CROW_FILES
+  lib/Crow/Crow.cpp
+  include/souper/Crow/Crow.h
+)
+
 
 set(SOUPER_SOURCES
   ${SOUPER_EXTRACTOR_FILES}
@@ -253,13 +260,15 @@ set(SOUPER_CODEGEN_FILES
 
 add_library(souperPass SHARED
   ${KLEE_EXPR_FILES}
-  ${SOUPER_SOURCES}
+  ${SOUPER_SOURCES}  
+  ${SOUPER_CROW_FILES}
   lib/Pass/Pass.cpp
 )
 
 add_library(souperPassProfileAll SHARED
   ${KLEE_EXPR_FILES}
-  ${SOUPER_SOURCES}
+  ${SOUPER_SOURCES}  
+  ${SOUPER_CROW_FILES}
   lib/Pass/Pass.cpp
 )
 
