@@ -20,7 +20,6 @@
 #include "souper/Infer/EnumerativeSynthesis.h"
 #include "souper/Infer/Pruning.h"
 #include "souper/Crow/Crow.h"
-
 #include <queue>
 #include <functional>
 #include <set>
@@ -29,14 +28,16 @@
 
 //static const unsigned MaxLHSCands = 200000;
 
-static const unsigned MaxTries = 30;
+static const unsigned MaxTries = 2;
 // static const unsigned MaxInputSpecializationTries = 2;
 
 bool UseAlive;
-extern unsigned DebugLevel;
 
 using namespace souper;
 using namespace llvm;
+
+extern unsigned DebugLevel;
+extern bool CROW;
 
 static const std::vector<Inst::Kind> UnaryOperators = {
   Inst::CtPop, Inst::BSwap, Inst::BitReverse, Inst::Cttz, Inst::Ctlz, Inst::Freeze
@@ -649,20 +650,33 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, std::vector<Inst *> &R
     }
     assert (RHS);
     RHSs.emplace_back(RHS);
-
-
+    ReplacementContext RC;
     // CROW TODO send back to CROW
 
-    //if(CountValid){
-     //   CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
-    //}
+    if(CROW){
+        CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+        if(bridge->isOpen()){
+
+          std::string RHString;
+          llvm::raw_string_ostream SS(RHString);
+
+          auto S = GetReplacementLHSString(SC.BPCs, SC.PCs,
+                                      SC.LHS, RC);
+          PrintReplacementRHS(SS, RHS, RC, true);
+          bridge->sendKVPair(S, RHString);
+        }
+      }else{
+        if(DebugLevel > 2)
+            errs() << "There is no communication with the CROW server\n";
+      }
+
+
     if (!SC.CheckAllGuesses) {
       return EC;
     }
 
     if (DebugLevel > 3) {
       llvm::outs() << "; result " << RHSs.size() << ":\n";
-      ReplacementContext RC;
       RC.printInst(RHS, llvm::outs(), false);
       llvm::outs() << "\n";
     }
@@ -778,13 +792,31 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
     if (RHS) {
       RHSs.emplace_back(RHS);
 
+      ReplacementContext RC;
+
+      if(CROW){
+        CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+        if(bridge->isOpen()){
+
+          std::string RHString;
+          llvm::raw_string_ostream SS(RHString);
+
+          auto S = GetReplacementLHSString(SC.BPCs, SC.PCs,
+                                      SC.LHS, RC);
+          PrintReplacementRHS(SS, RHS, RC, true);
+          bridge->sendKVPair(S, RHString);
+        }
+        else{
+          if(DebugLevel > 1)
+              errs() << "There is no communication with the CROW server\n";
+        }
+      }
       // CROW TODO, send back to CROW the replacement and the key
 
-      if (!SC.CheckAllGuesses)
+      if (!SC.CheckAllGuesses && !CROW)
         return EC;
       if (DebugLevel > 3) {
         llvm::outs() << "; result " << RHSs.size() << ":\n";
-        ReplacementContext RC;
         RC.printInst(RHS, llvm::outs(), true);
         llvm::outs() << "\n";
 

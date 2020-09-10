@@ -36,8 +36,9 @@ namespace souper {
 		public:
 		// This is how clients can access the single instance
 			static CROWSocketBridge* getInstance();
-			void init();
+			int init();
 			bool isOpen();
+			int reconnect();
 			void sendKVPair(std::string key, std::string replacement);
 
 		protected:

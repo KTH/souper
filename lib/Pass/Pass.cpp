@@ -335,52 +335,21 @@ public:
         continue;
 
 
+      if(CROW){
+        rk_sema_post(&mutex);
+        exit(0);
+      }
+
       Instruction *I = Cand.Origin;
       assert(Cand.Mapping.LHS->hasOrigin(I));
       IRBuilder<> Builder(I);
 
 
       std::vector<Inst *>::iterator it = RHSs.begin();
-
       Cand.Mapping.RHS = nullptr;
-
       Value *NewVal = nullptr;
-      
-      if(CROW && DebugLevel > 1)
-        errs() << "Saving replacements\n";
-
-      if(CROW){
-        ReplacementContext Context;
-
-        // Save all RHSs in the cache for later usage in CROW
-        std::string LHSStr = GetReplacementLHSString(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,Context);
-        std::string RHSStr;
-        while(it != RHSs.end()){
-          Cand.Mapping.RHS = *it;
-
-          std::string S;
-          RHSStr = GetReplacementRHSString(Cand.Mapping.RHS, Context);
-
-
-          // TODO send tirough socket
-          CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
-          //if(bridge->isOpen()){
-          //  bridge->sendKVPair(LHSStr, RHSStr);
-          //}
-
-          it++;
-        }
-
-        
-        if (DebugLevel > 1)
-          errs() << "\n; CROW populating...\n";
-
-        rk_sema_post(&mutex);
-        exit(0);
-      }
 
       it = RHSs.begin();
-      NewVal = nullptr;
 
       while(!NewVal){
         Cand.Mapping.RHS = *it;
@@ -577,12 +546,10 @@ public:
     if (Verify && verifyModule(M, &errs()))
       llvm::report_fatal_error("module broken after (and probably by) Souper");
 
-    if (DebugLevel > 1){
+    if (DebugLevel > 1 && !CROW){
       errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
-    if(CROW)
-      errs() << "[" << nametext << "/" << TotalCandidates <<"]\n";
     
     return Changed;
   }
