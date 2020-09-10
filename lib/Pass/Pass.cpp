@@ -44,7 +44,6 @@
 #include "souper/Tool/CandidateMapUtils.h"
 #include "souper/Inst/Inst.h"
 #include "souper/Crow/Crow.h"
-#include "set"
 
 
 STATISTIC(InstructionReplaced, "Number of instructions replaced by another instruction");
@@ -87,6 +86,14 @@ static cl::opt<unsigned> FirstReplace("souper-first-opt", cl::Hidden,
     cl::init(0),
     cl::desc("First Souper optimization to perform (default=0)"));
 
+static cl::opt<unsigned> CROWWorkers("souper-crow-workers", cl::Hidden,
+    cl::init(1),
+    cl::desc("Number of paralleling inferring to get valid replacements"));
+
+static cl::opt<unsigned> CROWPort("souper-crow-port", cl::Hidden,
+    cl::init(56789),
+    cl::desc("CROW socket port"));
+
 static cl::opt<unsigned> LastReplace("souper-last-opt", cl::Hidden,
     cl::init(std::numeric_limits<unsigned>::max()),
     cl::desc("Last Souper optimization to perform (default=infinite)"));
@@ -102,7 +109,6 @@ static const bool DynamicProfileAll = false;
 static std::string nametext = "";
 static rk_sema mutex;
 static rk_sema save_lock;
-
 
 
 struct SouperPass : public ModulePass {
@@ -291,6 +297,7 @@ public:
           rk_sema_wait(&mutex); // wait for the semaphore
 
           if(CROW && DebugLevel > 2)
+
             errs() << "\tSemaphore granted \n";
           pid = fork();
       }
@@ -301,6 +308,7 @@ public:
 
       auto Cand = CandCopy;     
       if(CROW && DebugLevel > 2)
+
         errs() << "Forking inferring process \n";
 
       if (StaticProfile) {
@@ -334,7 +342,6 @@ public:
       if (RHSs.empty())
         continue;
 
-
       if(CROW){
         rk_sema_post(&mutex);
         exit(0);
@@ -346,10 +353,12 @@ public:
 
 
       std::vector<Inst *>::iterator it = RHSs.begin();
+
       Cand.Mapping.RHS = nullptr;
       Value *NewVal = nullptr;
 
       it = RHSs.begin();
+
 
       while(!NewVal){
         Cand.Mapping.RHS = *it;
@@ -522,6 +531,7 @@ public:
     if(CROW){
       CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
       bridge->init();
+
     }
 
     if (DebugLevel > 3)
@@ -550,6 +560,7 @@ public:
       errs() << "Total of " << ReplacementsDone << " replacements done on this module\n";
       errs() << "Total of " << ReplacementIdx << " replacements candidates on this module\n";
     }
+
     
     return Changed;
   }
