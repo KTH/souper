@@ -414,7 +414,7 @@ target_link_libraries(clang-souper souperClangTool souperExtractor souperKVStore
 target_link_libraries(count-insts souperParser)
 target_link_libraries(souper2llvm souperParser souperCodegen)
 target_link_libraries(extractor_tests souperExtractor souperParser ${GTEST_LIBS} ${ALIVE_LIBRARY})
-target_link_libraries(inst_tests souperInfer souperInst souperExtractor ${GTEST_LIBS} ${ALIVE_LIBRARY})
+target_link_libraries(inst_tests souperInfer souperPass souperInst souperExtractor ${GTEST_LIBS} ${ALIVE_LIBRARY})
 target_link_libraries(parser_tests souperParser ${GTEST_LIBS} ${ALIVE_LIBRARY})
 target_link_libraries(interpreter_tests souperInfer souperInst ${GTEST_LIBS} ${ALIVE_LIBRARY})
 target_link_libraries(bulk_tests souperInfer souperInst ${GTEST_LIBS} ${ALIVE_LIBRARY} ${Z3_LIBRARY})
@@ -451,6 +451,16 @@ add_custom_target(check
 # we want assertions even in release mode!
 string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
 
+find_program(GO_EXECUTABLE NAMES go DOC "go executable")
+if(NOT GO_EXECUTABLE STREQUAL "GO_EXECUTABLE-NOTFOUND")
+  add_executable(souperweb-backend
+    tools/souperweb-backend.cpp
+  )
+  set_target_properties(souperweb-backend
+    PROPERTIES COMPILE_FLAGS "${LLVM_CXXFLAGS}")
+  target_include_directories(souperweb-backend PRIVATE "${LLVM_INCLUDEDIR}")
+
+  target_link_libraries(souperweb-backend souperTool souperExtractor souperPass souperKVStore souperSMTLIB2 souperParser souperInst ${HIREDIS_LIBRARY})
 
 
 add_library(profileRuntime STATIC
