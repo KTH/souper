@@ -174,7 +174,8 @@ PruneFunc MkPruneFunc(std::vector<PruneFunc> Funcs) {
 }
 
 bool CountPrune(Inst *I, std::vector<Inst *> &ReservedInsts, std::set<Inst*> Visited) {
-  return !(souper::countHelper(I, Visited) > MaxNumInstructions);
+  // CROW: for CROW the size of the guess does not matter
+  return true;
 }
 
 //TODO(manasij/zhengyang) souper::cost needs a caching layer
@@ -287,10 +288,11 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
     }
 
     for (auto I = Comps.begin(); I != Comps.end(); ++I) {
+      // CROW: we need commutative operations
       // Prune: only one of (mul x, C), (mul C, x) is allowed
-      if ((Inst::isCommutative(K) || Inst::isOverflowIntrinsicMain(K) ||
-           Inst::isOverflowIntrinsicSub(K)) && (*I)->K == Inst::ReservedConst)
-        continue;
+      //if ((Inst::isCommutative(K) || Inst::isOverflowIntrinsicMain(K) ||
+      //     Inst::isOverflowIntrinsicSub(K)) && (*I)->K == Inst::ReservedConst)
+      //  continue;
 
       // Prune: I1 should only be the first argument
       if ((*I)->K == Inst::ReservedInst && (*I) != I1)
@@ -471,13 +473,13 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
             continue;
 
           // PRUNE: ter-op c, c, c
-          if (I->K == Inst::ReservedConst && J->K == Inst::ReservedConst &&
-              K->K == Inst::ReservedConst)
-            continue;
+          //if (I->K == Inst::ReservedConst && J->K == Inst::ReservedConst &&
+          //    K->K == Inst::ReservedConst)
+          //  continue;
 
           // PRUNE: (select cond, x, x)
-          if (Op == Inst::Select && J == K)
-            continue;
+          //if (Op == Inst::Select && J == K)
+          //  continue;
 
           Inst *V3;
           if (K->K == Inst::ReservedConst) {
@@ -497,7 +499,8 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
       }
     }
   }
-  sortGuesses(PartialGuesses);
+  // CROW: We dont care about cost
+  //sortGuesses(PartialGuesses);
   //FIXME: This is a bit heavy-handed. Find a way to eliminate this sorting.
 
   for (auto I : PartialGuesses) {
