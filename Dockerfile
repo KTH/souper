@@ -27,7 +27,7 @@ run export CC=clang CXX=clang++ \
 	&& cd /usr/src/souper \
 #	&& ./build_deps.sh Debug \
 #       && rm -rf third_party/llvm/Debug-build \
-	&& bash ./build_deps.sh 
+	&& bash ./build_deps.sh Release
 	
 run	rm -rf third_party/llvm/Release-build \
 	&& rm -rf third_party/hiredis/install/lib/libhiredis.so*
