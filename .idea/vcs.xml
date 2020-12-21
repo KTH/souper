@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/third_party/alive2" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/third_party/hiredis" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/third_party/klee" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/third_party/llvm-project" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/third_party/z3" vcs="Git" />
+  </component>
+</project>

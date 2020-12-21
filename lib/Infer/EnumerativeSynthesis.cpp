@@ -19,7 +19,7 @@
 #include "souper/Infer/ConstantSynthesis.h"
 #include "souper/Infer/EnumerativeSynthesis.h"
 #include "souper/Infer/Pruning.h"
-
+#include "souper/Crow/Crow.h"
 #include <queue>
 #include <functional>
 #include <set>
@@ -28,14 +28,16 @@
 
 //static const unsigned MaxLHSCands = 200000;
 
-static const unsigned MaxTries = 30;
+static const unsigned MaxTries = 2;
 // static const unsigned MaxInputSpecializationTries = 2;
 
 bool UseAlive;
-extern unsigned DebugLevel;
 
 using namespace souper;
 using namespace llvm;
+
+extern unsigned DebugLevel;
+extern bool CROW;
 
 static const std::vector<Inst::Kind> UnaryOperators = {
   Inst::CtPop, Inst::BSwap, Inst::BitReverse, Inst::Cttz, Inst::Ctlz, Inst::Freeze
@@ -172,7 +174,8 @@ PruneFunc MkPruneFunc(std::vector<PruneFunc> Funcs) {
 }
 
 bool CountPrune(Inst *I, std::vector<Inst *> &ReservedInsts, std::set<Inst*> Visited) {
-  return !(souper::countHelper(I, Visited) > MaxNumInstructions);
+  // CROW: for CROW the size of the guess does not matter
+  return true;
 }
 
 //TODO(manasij/zhengyang) souper::cost needs a caching layer
@@ -285,10 +288,11 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
     }
 
     for (auto I = Comps.begin(); I != Comps.end(); ++I) {
+      // CROW: we need commutative operations
       // Prune: only one of (mul x, C), (mul C, x) is allowed
-      if ((Inst::isCommutative(K) || Inst::isOverflowIntrinsicMain(K) ||
-           Inst::isOverflowIntrinsicSub(K)) && (*I)->K == Inst::ReservedConst)
-        continue;
+      //if ((Inst::isCommutative(K) || Inst::isOverflowIntrinsicMain(K) ||
+      //     Inst::isOverflowIntrinsicSub(K)) && (*I)->K == Inst::ReservedConst)
+      //  continue;
 
       // Prune: I1 should only be the first argument
       if ((*I)->K == Inst::ReservedInst && (*I) != I1)
@@ -469,13 +473,13 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
             continue;
 
           // PRUNE: ter-op c, c, c
-          if (I->K == Inst::ReservedConst && J->K == Inst::ReservedConst &&
-              K->K == Inst::ReservedConst)
-            continue;
+          //if (I->K == Inst::ReservedConst && J->K == Inst::ReservedConst &&
+          //    K->K == Inst::ReservedConst)
+          //  continue;
 
           // PRUNE: (select cond, x, x)
-          if (Op == Inst::Select && J == K)
-            continue;
+          //if (Op == Inst::Select && J == K)
+          //  continue;
 
           Inst *V3;
           if (K->K == Inst::ReservedConst) {
@@ -495,7 +499,8 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
       }
     }
   }
-  sortGuesses(PartialGuesses);
+  // CROW: We dont care about cost
+  //sortGuesses(PartialGuesses);
   //FIXME: This is a bit heavy-handed. Find a way to eliminate this sorting.
 
   for (auto I : PartialGuesses) {
@@ -648,12 +653,32 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, std::vector<Inst *> &R
     }
     assert (RHS);
     RHSs.emplace_back(RHS);
+    ReplacementContext RC;
+
+    if(CROW){
+        CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+        if(bridge->isOpen()){
+
+          std::string RHString;
+          llvm::raw_string_ostream SS(RHString);
+
+          auto S = GetReplacementLHSString(SC.BPCs, SC.PCs,
+                                      SC.LHS, RC);
+          PrintReplacementRHS(SS, RHS, RC, true);
+          bridge->sendKVPair(S, RHString);
+        }
+      }else{
+        if(DebugLevel > 2)
+            errs() << "There is no communication with the CROW server\n";
+      }
+
+
     if (!SC.CheckAllGuesses) {
       return EC;
     }
+
     if (DebugLevel > 3) {
       llvm::outs() << "; result " << RHSs.size() << ":\n";
-      ReplacementContext RC;
       RC.printInst(RHS, llvm::outs(), false);
       llvm::outs() << "\n";
     }
@@ -737,16 +762,19 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
     assert(RHS);
 
     if (DoubleCheckWithAlive) {
-      if (isTransformationValid(SC.LHS, RHS, SC.PCs, SC.IC)) {
-	if (DebugLevel > 3)
-	  llvm::errs() << "Transformation proved correct by alive.\n";
+      if (isTransformationValid(SC.LHS, RHS, SC.PCs, SC.BPCs, SC.IC)) {
+        if (DebugLevel > 3) {
+          llvm::errs() << "Transformation verified by alive.\n";
+        }
       } else {
-        llvm::errs() << "Transformation proved wrong by alive.\n";
-        ReplacementContext RC;
-        auto str = RC.printInst(SC.LHS, llvm::errs(), /*printNames=*/true);
-        llvm::errs() << "infer " << str << "\n";
-        str = RC.printInst(RHS, llvm::errs(), /*printNames=*/true);
-        llvm::errs() << "result " << str << "\n";
+        if (DebugLevel > 1) {
+          llvm::errs() << "Transformation could not be verified by alive.\n";
+          ReplacementContext RC;
+          auto str = RC.printInst(SC.LHS, llvm::errs(), /*printNames=*/true);
+          llvm::errs() << "infer " << str << "\n";
+          str = RC.printInst(RHS, llvm::errs(), /*printNames=*/true);
+          llvm::errs() << "result " << str << "\n";
+        }
         RHS = nullptr;
       }
     }
@@ -762,18 +790,37 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
       std::map<Inst *, Inst *> InstCache;
       std::map<Block *, Block *> BlockCache;
       auto newRHS = getInstCopy(I, SC.IC, InstCache, BlockCache, &ZeroConstMap, false);
-      if (isTransformationValid(SC.LHS, newRHS, SC.PCs, SC.IC))
+      if (isTransformationValid(SC.LHS, newRHS, SC.PCs, SC.BPCs, SC.IC))
         RHS = newRHS;
     }
     
     if (RHS) {
       RHSs.emplace_back(RHS);
 
-      if (!SC.CheckAllGuesses)
+      ReplacementContext RC;
+
+      if(CROW){
+        CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+        if(bridge->isOpen()){
+
+          std::string RHString;
+          llvm::raw_string_ostream SS(RHString);
+
+          auto S = GetReplacementLHSString(SC.BPCs, SC.PCs,
+                                      SC.LHS, RC);
+          PrintReplacementRHS(SS, RHS, RC, true);
+          bridge->sendKVPair(S, RHString);
+        }
+        else{
+          if(DebugLevel > 1)
+              errs() << "There is no communication with the CROW server\n";
+        }
+      }
+
+      if (!SC.CheckAllGuesses && !CROW)
         return EC;
       if (DebugLevel > 3) {
         llvm::outs() << "; result " << RHSs.size() << ":\n";
-        ReplacementContext RC;
         RC.printInst(RHS, llvm::outs(), true);
         llvm::outs() << "\n";
 

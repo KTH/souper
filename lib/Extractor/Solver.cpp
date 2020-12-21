@@ -26,6 +26,7 @@
 #include "souper/Infer/ConstantSynthesis.h"
 #include "souper/Infer/EnumerativeSynthesis.h"
 #include "souper/Infer/InstSynthesis.h"
+#include "souper/Infer/Preconditions.h"
 #include "souper/Infer/Pruning.h"
 #include "souper/KVStore/KVStore.h"
 #include "souper/Parser/Parser.h"
@@ -262,6 +263,44 @@ public:
     return std::error_code();
   }
 
+  std::error_code abstractPrecondition(const BlockPCs &BPCs,
+                  const std::vector<InstMapping> &PCs,
+                  InstMapping &Mapping, InstContext &IC,
+                  bool &FoundWeakest) override {
+    SynthesisContext SC{IC, SMTSolver.get(), Mapping.LHS, /*LHSUB*/nullptr, PCs,
+                      BPCs, /*CheckAllGuesses=*/false, Timeout};
+
+    std::vector<std::map<Inst *, llvm::KnownBits>> Results =
+            inferAbstractKBPreconditions(SC, Mapping.RHS, SMTSolver.get(), this, FoundWeakest);
+
+    ReplacementContext RC;
+    auto LHSStr = RC.printInst(Mapping.LHS, llvm::outs(), true);
+    llvm::outs() << "infer " << LHSStr << "\n";
+    auto RHSStr = RC.printInst(Mapping.RHS, llvm::outs(), true);
+    llvm::outs() << "result " << RHSStr << "\n";
+    for (size_t i = 0; i < Results.size(); ++i) {
+      for (auto It = Results[i].begin(); It != Results[i].end(); ++It) {
+        auto &&P = *It;
+        std::string dummy;
+        llvm::raw_string_ostream str(dummy);
+        auto VarStr = RC.printInst(P.first, str, false);
+        llvm::outs() << VarStr << " -> " << Inst::getKnownBitsString(P.second.Zero, P.second.One);
+
+        auto Next = It;
+        Next++;
+        if (Next != Results[i].end()) {
+          llvm::outs()  << " (and) ";
+        }
+      }
+      if (i == Results.size() - 1) {
+        llvm::outs() << "\n";
+      } else  {
+        llvm::outs() << "\n(or)\n";
+      }
+    }
+    return {};
+  }
+
   std::error_code knownBits(const BlockPCs &BPCs,
                           const std::vector<InstMapping> &PCs,
                           Inst *LHS, KnownBits &Known,
@@ -392,7 +431,7 @@ public:
         std::set<Inst*> ConstSet{C};
         ConstantSynthesis CS;
         EC = CS.synthesize(SMTSolver.get(), BPCs, PCs, InstMapping(LHS, C), ConstSet,
-                           ResultMap, IC, /*MaxTries=*/10, Timeout, false);
+                           ResultMap, IC, /*MaxTries=*/3, Timeout, false);
         if (ResultMap.find(C) != ResultMap.end()) {
           RHSs.emplace_back(IC.getConst(ResultMap[C]));
           return std::error_code();
@@ -413,7 +452,7 @@ public:
     } else {
       EnumerativeSynthesis ES;
       EC = ES.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHSs,
-                         AllowMultipleRHSs, IC, Timeout);
+                         /*AllowMultipleRHSs = */true, IC, Timeout);
       if (EC || !RHSs.empty())
         return EC;
     }
@@ -428,7 +467,7 @@ public:
                           std::vector<std::pair<Inst *, llvm::APInt>> *Model)
   override {
     if (UseAlive) {
-      IsValid = isTransformationValid(Mapping.LHS, Mapping.RHS, PCs, IC);
+      IsValid = isTransformationValid(Mapping.LHS, Mapping.RHS, PCs, BPCs, IC);
       return std::error_code();
     }
     std::string Query;
@@ -704,6 +743,13 @@ public:
     return UnderlyingSolver->negative(BPCs, PCs, LHS, Negative, IC);
   }
 
+  std::error_code abstractPrecondition(const BlockPCs &BPCs,
+                  const std::vector<InstMapping> &PCs,
+                  InstMapping &Mapping, InstContext &IC,
+                  bool &FoundWeakest) override {
+    return UnderlyingSolver->abstractPrecondition(BPCs, PCs, Mapping, IC, FoundWeakest);
+  }
+
   std::error_code knownBits(const BlockPCs &BPCs,
                             const std::vector<InstMapping> &PCs,
                             Inst *LHS, KnownBits &Known,
@@ -835,6 +881,13 @@ public:
                            Inst *LHS, bool &Negative,
                            InstContext &IC) override {
     return UnderlyingSolver->negative(BPCs, PCs, LHS, Negative, IC);
+  }
+
+  std::error_code abstractPrecondition(const BlockPCs &BPCs,
+                  const std::vector<InstMapping> &PCs,
+                  InstMapping &Mapping, InstContext &IC,
+                  bool &FoundWeakest) override {
+    return UnderlyingSolver->abstractPrecondition(BPCs, PCs, Mapping, IC, FoundWeakest);
   }
 
   std::error_code knownBits(const BlockPCs &BPCs,

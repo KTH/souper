@@ -252,6 +252,9 @@ void addComplexConstraints(Inst *I,
                            Inst *&Constraints, const std::set<Inst *> &ConstSet,
                            InstContext &IC) {
 
+
+  // CROW TODO remove
+
   // TODO: consider pattern-matching and preventing:
   // --x
   // ~~x
@@ -409,7 +412,7 @@ ConstantSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     std::map<Inst *, Inst *> InstCache;
     std::map<Block *, Block *> BlockCache;
     Inst *RHSCopy = getInstCopy(Mapping.RHS, IC, InstCache, BlockCache, &ConstMap, false);
-    assert(BlockCache.empty());
+
     std::vector<Block *> Blocks = getBlocksFromPhis(Mapping.LHS);
     for (auto Block : Blocks) {
       Block->ConcretePred = 0;

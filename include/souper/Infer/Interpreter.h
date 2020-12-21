@@ -101,6 +101,7 @@ EvalValue evaluateSubNW(llvm::APInt A, llvm::APInt B);
 EvalValue evaluateMulNSW(llvm::APInt a, llvm::APInt b);
 EvalValue evaluateMulNUW(llvm::APInt a, llvm::APInt b);
 EvalValue evaluateMulNW(llvm::APInt a, llvm::APInt b);
+EvalValue evaluateSDiv(llvm::APInt A, llvm::APInt B);
 EvalValue evaluateUDiv(llvm::APInt A, llvm::APInt B);
 EvalValue evaluateURem(llvm::APInt A, llvm::APInt B);
 EvalValue evaluateShl(llvm::APInt A, llvm::APInt B);
@@ -110,7 +111,7 @@ EvalValue evaluateAShr(llvm::APInt A, llvm::APInt B);
   class ConcreteInterpreter {
     ValueCache Cache;
     bool CacheWritable = false;
-
+    bool EvalPhiFirstBranch = false;
     EvalValue evaluateSingleInst(Inst *I, std::vector<EvalValue> &Args);
 
   public:
@@ -121,7 +122,7 @@ EvalValue evaluateAShr(llvm::APInt A, llvm::APInt B);
       evaluateInst(I);
       CacheWritable = false;
     }
-
+    void setEvalPhiFirstBranch() {EvalPhiFirstBranch = true;};
     EvalValue evaluateInst(Inst *Root);
   };
 

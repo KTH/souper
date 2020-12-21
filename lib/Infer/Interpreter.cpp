@@ -105,6 +105,12 @@ namespace souper {
     return {a.udiv(b)};
   }
 
+  EvalValue evaluateSDiv(llvm::APInt a, llvm::APInt b) {
+    if (b == 0 || (a.isMinSignedValue() && b == -1))
+      return EvalValue::ub();
+    return {a.sdiv(b)};
+  }
+
   EvalValue evaluateURem(llvm::APInt a, llvm::APInt b) {
     if (b == 0)
       return EvalValue::ub();
@@ -168,8 +174,12 @@ namespace souper {
       // operands. If we ever want to deterministically interpret an LHS
       // containing a phi, this needs to start returning a list, or there needs
       // to be enough information in BlockPCs to interpret ARG0
-      if (Inst->B->ConcretePred == -1)
+      if (Inst->B->ConcretePred == -1) {
+        if (EvalPhiFirstBranch) {
+          return Args[0];
+        }
         llvm::report_fatal_error("Interpreter can't find an input for block, exiting");
+      }
       return Args[Inst->B->ConcretePred];
 
     case Inst::Add:
