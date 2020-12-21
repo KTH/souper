@@ -40,7 +40,10 @@ extern unsigned DebugLevel;
 extern bool CROW;
 
 static const std::vector<Inst::Kind> UnaryOperators = {
-  Inst::CtPop, Inst::BSwap, Inst::BitReverse, Inst::Cttz, Inst::Ctlz, Inst::Freeze
+  Inst::CtPop, Inst::BSwap, Inst::BitReverse, Inst::Cttz, Inst::Ctlz
+  
+  // CROW we dont need these instructions
+  //, Inst::Freeze
 };
 
 static const std::vector<Inst::Kind> BinaryOperators = {
@@ -51,8 +54,10 @@ static const std::vector<Inst::Kind> BinaryOperators = {
   Inst::Shl, Inst::AShr, Inst::LShr,
   Inst::Eq, Inst::Ne, Inst::Ult,
   Inst::Slt, Inst::Ule, Inst::Sle,
-  Inst::SAddSat, Inst::UAddSat,
-  Inst::SSubSat, Inst::USubSat,
+
+  // CROW we dont need these instructions
+  //Inst::SAddSat, Inst::UAddSat,
+  //Inst::SSubSat, Inst::USubSat,
 
   /* Overflow intrinsics are synthesized always with `extractvalue`.
    * Main overflow intrinsics like {S,U}{Add,Sub,Mul}WithOverflow below means synthesizing
@@ -61,12 +66,14 @@ static const std::vector<Inst::Kind> BinaryOperators = {
   Inst::SAddWithOverflow, Inst::UAddWithOverflow,
   Inst::SSubWithOverflow, Inst::USubWithOverflow,
   Inst::SMulWithOverflow, Inst::UMulWithOverflow,
-  Inst::SAddO, Inst::UAddO, Inst::SSubO,
-  Inst::USubO, Inst::SMulO, Inst::UMulO
+  //Inst::SAddO, Inst::UAddO, Inst::SSubO,
+  //Inst::USubO, Inst::SMulO, Inst::UMulO
 };
 
 static const std::vector<Inst::Kind> TernaryOperators = {
-  Inst::Select, Inst::FShl, Inst::FShr
+  Inst::Select 
+  // CROW we dont need these instructions
+  //, Inst::FShl, Inst::FShr
 };
 
 namespace {
