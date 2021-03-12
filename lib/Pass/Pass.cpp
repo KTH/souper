@@ -54,6 +54,7 @@ using namespace llvm;
 
 unsigned DebugLevel;
 extern bool CROW;
+extern bool CROWCheckMetadata;
 extern unsigned CROWWorkers;
 extern std::string SouperSubset;
 
@@ -85,14 +86,6 @@ static cl::opt<bool> StaticProfile("souper-static-profile", cl::init(false),
 static cl::opt<unsigned> FirstReplace("souper-first-opt", cl::Hidden,
     cl::init(0),
     cl::desc("First Souper optimization to perform (default=0)"));
-
-static cl::opt<unsigned> CROWWorkers("souper-crow-workers", cl::Hidden,
-    cl::init(1),
-    cl::desc("Number of paralleling inferring to get valid replacements"));
-
-static cl::opt<unsigned> CROWPort("souper-crow-port", cl::Hidden,
-    cl::init(56789),
-    cl::desc("CROW socket port"));
 
 static cl::opt<unsigned> LastReplace("souper-last-opt", cl::Hidden,
     cl::init(std::numeric_limits<unsigned>::max()),
@@ -277,6 +270,10 @@ public:
         }
         AddToCandidateMap(CandMap, R);
       }
+    }
+
+    if(CROW && CROWCheckMetadata){
+      return false;
     }
 
     pid_t parent_id = getpid();
@@ -532,8 +529,7 @@ public:
 
     if(CROW){
       CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
-      bridge->init();
-
+      while(!bridge->init());
     }
 
     if (DebugLevel > 3)

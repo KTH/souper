@@ -452,7 +452,7 @@ public:
     } else {
       EnumerativeSynthesis ES;
       EC = ES.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHSs,
-                         /*AllowMultipleRHSs = */true, IC, Timeout);
+                         AllowMultipleRHSs, IC, Timeout);
       if (EC || !RHSs.empty())
         return EC;
     }

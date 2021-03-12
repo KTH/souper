@@ -8,6 +8,16 @@ extern unsigned DebugLevel;
 
 bool CROW;
 unsigned CROWWorkers;
+unsigned CROWMaxReplacementSize;
+
+bool CROWPruneSelect;
+bool CROWPruneUnaryOperatorOnConstant;
+bool CROWPruneBinaryCommutative;
+bool CROWOperateOnTwoConstants;
+bool CROWPruneSub;
+bool CROWPruneConstantSelect;
+bool CROWCheckMetadata;
+
 std::string SouperSubset;
 
 
@@ -31,6 +41,54 @@ namespace souper {
         cl::location(CROWWorkers),
         cl::init(1));
         
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWCheckMetadataFlag(
+        "souper-crow-check",
+        cl::desc("Check only for metadata, not inferring"),
+        cl::location(CROWCheckMetadata),
+        cl::init(false));
+        
+
+    static cl::opt<unsigned, /*ExternalStorage=*/true> CROWMaxReplacementSizeFlags(
+        "souper-crow-max-replacement-size",
+        cl::desc("Maximum number of instructions in the replacement"),
+        cl::location(CROWMaxReplacementSize),
+        cl::init(1000));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWPruneSelectFlag(
+        "souper-crow-prune-select",
+        cl::desc("Prune select operators in enumerative synthesis"),
+        cl::location(CROWPruneSelect),
+        cl::init(false));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWPruneUnaryOperatorOnConstantFlag(
+        "souper-crow-prune-unary-operator-on-constant",
+        cl::desc("Prune unary operation on constant in enumerative synthesis"),
+        cl::location(CROWPruneUnaryOperatorOnConstant),
+        cl::init(false));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWPruneBinaryCommutativeFlag(
+        "souper-crow-prune-binary-commutative",
+        cl::desc("Prune binary commutative instructions in enumerative synthesis"),
+        cl::location(CROWPruneBinaryCommutative),
+        cl::init(false));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWOperateOnTwoConstantsFlag(
+        "souper-crow-prune-2const-operation",
+        cl::desc("Prune operate on two constants in enumerative synthesis"),
+        cl::location(CROWOperateOnTwoConstants),
+        cl::init(false));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWPruneSubFlag(
+        "souper-crow-prune-sub",
+        cl::desc("Prune to synthesize sub x, C since this is covered by add x, -C in enumerative synthesis"),
+        cl::location(CROWPruneSub),
+        cl::init(false));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWPruneConstantSelectFlag(
+        "souper-crow-prune-constant-select",
+        cl::desc("Prune select's control input should never be constant in enumerative synthesis"),
+        cl::location(CROWPruneConstantSelect),
+        cl::init(false));
 
     static cl::opt<std::string> CROWSocketHost(
         "souper-crow-host", cl::Hidden,
@@ -107,8 +165,11 @@ namespace souper {
 
     int CROWSocketBridge::init(){
 
+        // create an instance of your own connection handler
+       
+
         if(DebugLevel > 1)
-            errs() << "Opening socket server\n";
+            errs() << "Opening socket server on " << CROWPort << "\n";
       
         address.sin_family = AF_INET; 
         address.sin_port = htons(CROWPort);
@@ -119,9 +180,11 @@ namespace souper {
             sockfd = socket(AF_INET, SOCK_STREAM, 0);
             if(sockfd > -1){
                 opened = connect(sockfd, (struct sockaddr *)&address, sizeof(address)) == 0;
-
+                errs() << "Connection up and running\n";
                 return 1;
             }
+        }else{
+            errs() << "Invaild IP " << CROWSocketHost << "\n";
         }
         
         return 0;
@@ -141,7 +204,7 @@ namespace souper {
 
             if(DebugLevel > 1)
                 errs() << "Trying socket reconnection...\n";
-            sleep(CROWSocketTimeout);
+            //sleep(CROWSocketTimeout);
 
             tries--;      
         }

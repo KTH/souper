@@ -39,6 +39,14 @@ using namespace llvm;
 extern unsigned DebugLevel;
 extern bool CROW;
 
+extern bool CROWPruneSelect;
+extern bool CROWPruneUnaryOperatorOnConstant;
+extern bool CROWPruneBinaryCommutative;
+extern bool CROWOperateOnTwoConstants;
+extern bool CROWPruneSub;
+extern bool CROWPruneConstantSelect;
+extern unsigned CROWMaxReplacementSize;
+
 static const std::vector<Inst::Kind> UnaryOperators = {
   Inst::CtPop, Inst::BSwap, Inst::BitReverse, Inst::Cttz, Inst::Ctlz
   
@@ -205,10 +213,20 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
                 int &TooExpensive,
                 PruneFunc prune, CallbackType Generate) {
 
+    
+
   std::vector<Inst *> unaryHoleUsers;
   findInsts(PrevInst, unaryHoleUsers, [PrevSlot](Inst *I) {
     return I->Ops.size() == 1 && I->Ops[0] == PrevSlot;
   });
+ // Since we are disabling some peephole optimizations, we need to cope the maximum size of the generated tree
+  if (PrevInst && souper::cost(PrevInst) + 1 >= CROWMaxReplacementSize){ // allow x more instructions
+
+    if (DebugLevel > 2){
+      llvm::errs() << "Cost " << souper::cost(PrevInst) << " we are stopping the guessing process\n";
+    }
+    return true;
+  }
 
   std::vector<Inst::Kind> unaryExclList;
   if (unaryHoleUsers.size() == 1 &&
@@ -261,7 +279,7 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
         continue;
 
       // Prune: unary operation on constant
-      if (Comp->K == Inst::ReservedConst)
+      if ((/*CROW => check prune*/  !CROW || CROWPruneUnaryOperatorOnConstant) &&  Comp->K == Inst::ReservedConst)
         continue;
 
       auto N = IC.getInst(K, Width, { Comp });
@@ -297,9 +315,9 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
     for (auto I = Comps.begin(); I != Comps.end(); ++I) {
       // CROW: we need commutative operations
       // Prune: only one of (mul x, C), (mul C, x) is allowed
-      //if ((Inst::isCommutative(K) || Inst::isOverflowIntrinsicMain(K) ||
-      //     Inst::isOverflowIntrinsicSub(K)) && (*I)->K == Inst::ReservedConst)
-      //  continue;
+      if (( /*CROW => prune commutative*/ !CROW || CROWPruneBinaryCommutative) && ((Inst::isCommutative(K) || Inst::isOverflowIntrinsicMain(K) ||
+           Inst::isOverflowIntrinsicSub(K)) && (*I)->K == Inst::ReservedConst))
+        continue;
 
       // Prune: I1 should only be the first argument
       if ((*I)->K == Inst::ReservedInst && (*I) != I1)
@@ -311,20 +329,20 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
 		      Inst::isOverflowIntrinsicSub(K)) ? I : Comps.begin();
       for (auto J = Start; J != Comps.end(); ++J) {
         // Prune: I2 should only be the second argument
-        if ((*J)->K == Inst::ReservedInst && (*J) != I2)
+        if (( /*CROW => prune commutative*/ !CROW || CROWPruneBinaryCommutative) && ((*J)->K == Inst::ReservedInst && (*J) != I2))
           continue;
 
         // PRUNE: never useful to cmp, sub, and, or, xor, div, rem,
         // usub.sat, ssub.sat, ashr, lshr a value against itself
         // Also do it for sub.overflow -- no sense to check for overflow when results = 0
-        /*if ((*I == *J) && (Inst::isCmp(K) ||  K == Inst::Or ||
+        if ((!CROW) && (*I == *J) && (Inst::isCmp(K) ||  
                            K == Inst::USubSat || K == Inst::SSubSat ||
                            K == Inst::AShr || K == Inst::LShr || 
                            K == Inst::USubWithOverflow || K == Inst::SSubO || K == Inst::USubO))
-          continue;*/
+          continue;
 
         // PRUNE: never operate on two constants
-        if ((*I)->K == Inst::ReservedConst && (*J)->K == Inst::ReservedConst)
+        if ((!CROW || CROWOperateOnTwoConstants) && ((*I)->K == Inst::ReservedConst && (*J)->K == Inst::ReservedConst))
           continue;
 
         // see if we need to make a var representing a constant
@@ -390,7 +408,7 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
           continue;
 
         // PRUNE: don't synthesize sub x, C since this is covered by add x, -C
-        if (K == Inst::Sub && V2->K == Inst::Var && V2->SynthesisConstID != 0)
+        if ((!CROW || CROWPruneSub) && (K == Inst::Sub && V2->K == Inst::Var && V2->SynthesisConstID != 0))
           continue;
 
         Inst *N = nullptr;
@@ -434,7 +452,7 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
 
       // (select c, x, y)
       // PRUNE: a select's control input should never be constant
-      if (Op == Inst::Select && I->K == Inst::ReservedConst)
+      if ((!CROW || CROWPruneConstantSelect) && (Op == Inst::Select && I->K == Inst::ReservedConst))
         continue;
 
       // PRUNE: don't generate an i1 using funnel shift
@@ -506,8 +524,7 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
       }
     }
   }
-  // CROW: We dont care about cost
-  //sortGuesses(PartialGuesses);
+  sortGuesses(PartialGuesses);
   //FIXME: This is a bit heavy-handed. Find a way to eliminate this sorting.
 
   for (auto I : PartialGuesses) {
@@ -546,6 +563,16 @@ bool getGuesses(const std::vector<Inst *> &Inputs,
     // and fill the empty slots
     if (prune(JoinedGuess, CurrSlots)) {
       // TODO: replace this naive hole selection with some better algorithms
+
+      // Since we are disabling some peephole optimizations, we need to cope the maximum size of the generated tree
+      if (PrevInst && souper::cost(PrevInst) + 1 >= CROWMaxReplacementSize){ // allow x more instructions
+
+        if (DebugLevel > 2){
+          llvm::errs() << "Cost " << souper::cost(PrevInst) << " we are stopping the guessing process\n";
+        }
+        return true;
+      }
+
       if (!getGuesses(Inputs, CurrSlots.front()->Width,
                       LHSCost, IC, JoinedGuess,
                       CurrSlots.front(), TooExpensive, prune, Generate)) {
@@ -723,6 +750,7 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
 
   for (auto I : Guesses) {
     GuessIndex++;
+    // CROW TODO, also parallelize
     if (DebugLevel > 2) {
       llvm::errs() << "\n--------------------------------\nguess " << GuessIndex << "\n\n";
       ReplacementContext RC;
@@ -817,6 +845,11 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
                                       SC.LHS, RC);
           PrintReplacementRHS(SS, RHS, RC, true);
           bridge->sendKVPair(S, RHString);
+
+
+          if(DebugLevel > 0){
+              errs() << RHString << "\n";    
+          }      
         }
         else{
           if(DebugLevel > 1)
@@ -826,7 +859,7 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
 
       if (!SC.CheckAllGuesses && !CROW)
         return EC;
-      if (DebugLevel > 3) {
+      if (DebugLevel > 2) {
         llvm::outs() << "; result " << RHSs.size() << ":\n";
         RC.printInst(RHS, llvm::outs(), true);
         llvm::outs() << "\n";
@@ -893,6 +926,7 @@ EnumerativeSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     Guesses.push_back(Guess);
     if (Guesses.size() >= MaxV && !SkipSolver) {
       sortGuesses(Guesses);
+      // Is this verify needed, why not to verify at the end ? memory ?
       EC = verify(SC, RHSs, Guesses);
       Guesses.clear();
       return SC.CheckAllGuesses || (!SC.CheckAllGuesses && RHSs.empty()); // Continue if no RHS

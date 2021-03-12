@@ -46,10 +46,14 @@ add tools /usr/src/souper/tools
 add utils /usr/src/souper/utils
 add unittests /usr/src/souper/unittests
 
+
+#run rm -rf /usr/src/souper/third_party/llvm-Release-install
+#run mkdir -p /usr/src/souper/third_party/llvm-Release-install
+#run cp -r /usr/src/souper/third_party/llvm-Release-build/* /usr/src/souper/third_party/llvm-Release-install/ 
 run export GOPATH=/usr/src/go \
         && export LD_LIBRARY_PATH=/usr/src/souper/third_party/z3-install/lib:$LD_LIBRARY_PATH \
 	&& mkdir -p /usr/src/souper-build \
 	&& cd /usr/src/souper-build \
 	&& cmake -G Ninja ../souper \
-	&& ninja 
+	&& ninja
 run ls /usr/src/souper-build

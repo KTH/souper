@@ -278,8 +278,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
         }
         // CROW TODO send back to CROW and conitnue until stop
-        return EC;
       }
+      else
+        return EC;
 
       Refinements++;
       if (DebugLevel > 1)
