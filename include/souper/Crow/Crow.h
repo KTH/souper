@@ -12,7 +12,7 @@
 #include <sys/socket.h> 
 #include <netinet/in.h> 
 #include <arpa/inet.h>
-
+#include "souper/Inst/Inst.h"
 
 namespace souper {
 	struct rk_sema {
@@ -32,6 +32,7 @@ namespace souper {
 	class CROWSocketBridge { // Singleton
 
 		const char * addressIp = "127.0.0.1";
+
 		
 		public:
 		// This is how clients can access the single instance
@@ -39,7 +40,15 @@ namespace souper {
 			int init();
 			bool isOpen();
 			int reconnect();
-			void sendKVPair(std::string key, std::string replacement);
+			void sendKVPair(std::string key, std::string replacement, unsigned blockId);
+			void replace_check(std::function<bool(CROWSocketBridge*, Inst *)> new_func)
+			{
+				check_function = new_func;
+			}
+
+			bool check(Inst * instr){
+				return check_function(this, instr);
+			}
 
 		protected:
 			int sockfd = -1;
@@ -51,6 +60,11 @@ namespace souper {
 			CROWSocketBridge() : sockfd(-1),opened(false) {} // private constructor
 			CROWSocketBridge(const CROWSocketBridge&);
 			CROWSocketBridge& operator=(const CROWSocketBridge&);
+			bool check_default(Inst *I){
+				return true;
+			}
+			std::function<bool(CROWSocketBridge*, Inst *)> check_function = &CROWSocketBridge::check_default;
+
 
 	};
 

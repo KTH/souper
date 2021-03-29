@@ -24,6 +24,7 @@ using namespace souper;
 using namespace llvm;
 extern bool CROW;
 
+extern bool CROWSendVerify;
 namespace {
 
 static cl::opt<unsigned> DebugLevel("souper-synthesis-debug-level",
@@ -256,7 +257,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         RHS = Cand;
         ReplacementContext RC;
 
-        if(CROW){
+        if(CROW && !CROWSendVerify){
           CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
           if(bridge->isOpen()){
 
@@ -267,9 +268,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
             std::string S;
             llvm::raw_string_ostream SS1(S);
 
-            PrintReplacementLHS(SS1, BPCs, PCs, LHS, Context);
+            PrintReplacementLHS(SS1, BPCs, PCs, LHS, Context, true);
             PrintReplacementRHS(SS, RHS, RC, true);
-            bridge->sendKVPair(S, RHString);
+            bridge->sendKVPair(S, RHString, LHS->CROWGlobalId);
           }
           else{
             if(DebugLevel > 1)

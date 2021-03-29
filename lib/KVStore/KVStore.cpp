@@ -85,6 +85,7 @@ bool KVStore::KVImpl::hGet(llvm::StringRef Key, llvm::StringRef Field,
                            std::string &Value) {
   redisReply *reply = (redisReply *)redisCommand(Ctx, "HGET %s %s", Key.data(),
                                                  Field.data());
+    
   if (!reply || Ctx->err) {
     llvm::report_fatal_error((llvm::StringRef)"Redis error: " + Ctx->errstr);
   }
@@ -94,6 +95,7 @@ bool KVStore::KVImpl::hGet(llvm::StringRef Key, llvm::StringRef Field,
   } else if (reply->type == REDIS_REPLY_STRING) {
     Value = reply->str;
     freeReplyObject(reply);
+    
     return true;
   } else {
     llvm::report_fatal_error(

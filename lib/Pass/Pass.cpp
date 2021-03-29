@@ -31,6 +31,7 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Scalar/DCE.h"
@@ -55,8 +56,18 @@ using namespace llvm;
 unsigned DebugLevel;
 extern bool CROW;
 extern bool CROWCheckMetadata;
+extern bool CROWCountFunctions;
+extern bool CROWDontRecheck;
 extern unsigned CROWWorkers;
+extern bool CROWCountFunctionsAndName;
+extern bool CROWRenameFunctions;
+extern bool CROWSendVerify;
+
 extern std::string SouperSubset;
+
+extern std::string CROWMangleFunction;
+extern std::string CROWMangleNewName;
+
 
 namespace {
 std::unique_ptr<Solver> S;
@@ -254,6 +265,8 @@ public:
 
     FunctionCandidateSet CS = ExtractCandidatesFromPass(F, LI, DB, LVI, SE, TLI, IC, EBC);
 
+    CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+
     if (DebugLevel > 3)
       errs() << "; extracted candidates\n";
 
@@ -306,6 +319,7 @@ public:
       }
 
       auto Cand = CandCopy;     
+
       if(CROW && DebugLevel > 2)
 
         errs() << "Forking inferring process \n";
@@ -328,6 +342,8 @@ public:
 
       if(CROW && DebugLevel > 1)
         errs() << "Validating replacement\n";
+
+
       if (std::error_code EC =
           S->infer(Cand.BPCs, Cand.PCs, Cand.Mapping.LHS,
                    RHSs, AllowMultipleRHSs, IC)) {
@@ -335,16 +351,19 @@ public:
             EC == std::errc::value_too_large) {
           continue;
         } else {
-          report_fatal_error("Unable to query solver: " + EC.message() + "\n");
+          continue;
+          // Do not fail if replacement cannot be inferred
+          // report_fatal_error("Unable to query solver: " + EC.message() + "\n");
         }
       }
-      if (RHSs.empty())
+      if (RHSs.empty()){
+        if(CROW){
+          rk_sema_post(&mutex);
+          exit(0);
+        }
         continue;
-
-      if(CROW){
-        rk_sema_post(&mutex);
-        exit(0);
       }
+
 
       Instruction *I = Cand.Origin;
       assert(Cand.Mapping.LHS->hasOrigin(I));
@@ -364,6 +383,28 @@ public:
         NewVal = getValue(Cand.Mapping.RHS, I, EBC, DT,
                                ReplacedValues, Builder, F->getParent());
 
+        if(CROWSendVerify && NewVal){
+
+          if(bridge->isOpen()){
+              ReplacementContext RC;
+              std::string RHString;
+              llvm::raw_string_ostream SS(RHString);
+
+
+              std::string S;
+              llvm::raw_string_ostream SS1(S);
+
+              PrintReplacementLHS(SS1, Cand.BPCs, Cand.PCs, Cand.Mapping.LHS, RC, true);
+              PrintReplacementRHS(SS, Cand.Mapping.RHS, RC, true);
+              bridge->sendKVPair(S, RHString, Cand.Mapping.LHS->CROWGlobalId);
+              
+              if (DebugLevel > 2){
+                errs() << "Valid" << "\n";
+                errs() << S << "\n";
+                errs() << RHString << "\n";
+              }
+          }
+        }
         it++;
         if(it == RHSs.end()){
           if (DebugLevel > 1)
@@ -372,6 +413,10 @@ public:
         }
       }
 
+      if(CROW){
+        rk_sema_post(&mutex);
+        exit(0);
+      }
       // if LHS comes from use, then NewVal should be a constant
       assert(Cand.Mapping.LHS->HarvestKind != HarvestType::HarvestedFromUse ||
              isa<llvm::Constant>(NewVal));
@@ -401,16 +446,6 @@ public:
             continue;
           }
       }
-
-      if (ReplacementIdx < FirstReplace || ReplacementIdx > LastReplace) {
-        if (DebugLevel > 1)
-          errs() << "Skipping this replacement (number " << ReplacementIdx << ")\n";
-        if (ReplacementIdx < std::numeric_limits<unsigned>::max())
-          ++ReplacementIdx;
-        continue;
-      }
-      if (ReplacementIdx < std::numeric_limits<unsigned>::max())
-        ++ReplacementIdx;
 
       ReplacementsDone++;
 
@@ -451,7 +486,8 @@ public:
         dynamicProfile(F, Cand);
 
       if (Cand.Mapping.LHS->HarvestKind == HarvestType::HarvestedFromDef) {
-        I->replaceAllUsesWith(NewVal);
+        if (I->getType() == NewVal->getType())
+          I->replaceAllUsesWith(NewVal);
       } else {
         for (llvm::Value::use_iterator UI = I->use_begin();
              UI != I->use_end(); ) {
@@ -525,7 +561,77 @@ public:
     return 0;
   }
 
+
+  bool countFunctions(Module &M){
+    std::vector<Function *> FL;
+    int declarations = 0;
+    int definitions = 0;
+
+    for (auto &I : M)
+      FL.push_back((Function *)&I);
+    for (auto *F : FL) {
+      if (F->isDeclaration()) {
+        if(CROWCountFunctionsAndName){
+          errs() << "Declared " << F->getName().str() << "\n";
+        }
+        declarations++;
+      }
+      else {
+        if(CROWCountFunctionsAndName){
+          errs() << "Defined " << F->getName().str() << "\n";
+        }
+        definitions++;
+      }
+      
+    }
+
+    if(!CROWCountFunctionsAndName){
+      errs() << "Module " << M.getModuleIdentifier() << "\n";
+      errs() << "Declared " << declarations << "\n";
+      errs() << "Defined " << definitions << "\n";
+    }
+    return false; // No change
+  }
+
+
+  bool mangleFunction(Module &M){
+      errs() << "Changing names " <<  " \n";
+
+    std::vector<Function *> FL;
+    bool changed = false;
+    for (auto &I : M)
+      FL.push_back((Function *)&I);
+    for (auto *F : FL) {
+      if (F->isDeclaration()) {
+
+        //F->replaceAllUsesWith(UndefValue::get(F->getType()));
+        //F->removeFromParent(); 
+        
+        continue;
+      }
+      else
+        if(CROWMangleFunction.compare(F->getName().str()) == 0){
+          errs() << "Changed " << F->getName().str() << " to " << CROWMangleNewName <<  " \n";
+        
+          //F->setLinkage(GlobalValue::WeakAnyLinkage);
+          F->setName(CROWMangleNewName);
+          changed = true;
+        }
+      
+    }
+
+    return changed; // No change
+  }
+
   bool runOnModule(Module &M) {
+
+    if(CROW && CROWRenameFunctions){
+        return mangleFunction(M);
+    }
+
+    if(CROW && CROWCountFunctions){
+        return countFunctions(M);
+    }
 
     if(CROW){
       CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
@@ -544,10 +650,17 @@ public:
     for (auto *F : FL) {
       if (F->isDeclaration())
         continue;
-      while (runOnFunction(F)) {
-        Changed = true;
-        if (DebugLevel > 2)
-          errs() << "rescanning function after transformation was applied\n";
+
+      if (CROWDontRecheck){
+        if(runOnFunction(F))
+          Changed = true;
+      }
+      else{
+        while (runOnFunction(F)) {
+          Changed = true;
+          if (DebugLevel > 2)
+            errs() << "rescanning function after transformation was applied\n";
+        }
       }
     }
 

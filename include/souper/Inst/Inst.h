@@ -131,6 +131,7 @@ struct Inst : llvm::FoldingSetNode {
   Kind K;
   unsigned Number;
   unsigned Width;
+  unsigned CROWGlobalId;
   Block *B;
   bool Available = true;
   llvm::APInt Val;
@@ -297,11 +298,16 @@ std::string GetReplacementString(const BlockPCs &BPCs,
 void PrintReplacementLHS(llvm::raw_ostream &Out, const BlockPCs &BPCs,
                          const std::vector<InstMapping> &PCs,
                          Inst *LHS, ReplacementContext &Context,
-                         bool printNames = false);
+                         bool printNames = false, bool printBlockId = false);
 std::string GetReplacementLHSString(const BlockPCs &BPCs,
                                     const std::vector<InstMapping> &PCs,
                                     Inst *LHS, ReplacementContext &Context,
                                     bool printNames = false);
+std::string GetReplacementLHSStringWithBlockId(const BlockPCs &BPCs,
+                                    const std::vector<InstMapping> &PCs,
+                                    Inst *LHS, ReplacementContext &Context,
+                                    bool printNames = false);
+                                    
 void PrintReplacementRHS(llvm::raw_ostream &Out, Inst *RHS,
                          ReplacementContext &Context,
                          bool printNames = false);

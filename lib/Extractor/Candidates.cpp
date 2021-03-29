@@ -39,6 +39,7 @@
 #include <unordered_set>
 #include <tuple>
 #include "llvm/Analysis/ValueTracking.h"
+#include "souper/Crow/Crow.h"
 
 static llvm::cl::opt<bool> ExploitBPCs(
     "souper-exploit-blockpcs",
@@ -86,6 +87,7 @@ static llvm::cl::opt<bool> PrintDemandedBitsAtReturn(
     llvm::cl::init(false));
 
 extern bool UseAlive;
+extern unsigned* CROWGlobalCandidateIdPtr;
 
 using namespace llvm;
 using namespace souper;
@@ -1020,6 +1022,7 @@ void ExtractExprCandidates(Function &F, const LoopInfo *LI, DemandedBits *DB,
       }
       In->HarvestKind = HarvestType::HarvestedFromDef;
       In->HarvestFrom = nullptr;
+      In->CROWGlobalId = *CROWGlobalCandidateIdPtr;
       EB.markExternalUses(In);
       BCS->Replacements.emplace_back(&I, InstMapping(In, 0));
       assert(EB.get(&I)->hasOrigin(&I));
@@ -1039,6 +1042,7 @@ void ExtractExprCandidates(Function &F, const LoopInfo *LI, DemandedBits *DB,
 
       Result.Blocks.emplace_back(std::move(BCS));
     }
+    (*CROWGlobalCandidateIdPtr)++;
   }
 }
 

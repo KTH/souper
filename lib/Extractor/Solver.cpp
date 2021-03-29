@@ -810,6 +810,7 @@ public:
       return std::make_error_code(std::errc::value_too_large);
     std::string S;
     if (KV->hGet(LHSStr, "result", S)) {
+
       ++ExternalHits;
       if (S == "") {
         RHSs.clear();
@@ -822,6 +823,7 @@ public:
       }
       return std::error_code();
     } else {
+
       ++ExternalMisses;
       if (NoInfer) {
         RHSs.clear();

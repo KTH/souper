@@ -46,6 +46,7 @@ extern bool CROWOperateOnTwoConstants;
 extern bool CROWPruneSub;
 extern bool CROWPruneConstantSelect;
 extern unsigned CROWMaxReplacementSize;
+extern bool CROWSendVerify;
 
 static const std::vector<Inst::Kind> UnaryOperators = {
   Inst::CtPop, Inst::BSwap, Inst::BitReverse, Inst::Cttz, Inst::Ctlz
@@ -689,17 +690,18 @@ std::error_code synthesizeWithAlive(SynthesisContext &SC, std::vector<Inst *> &R
     RHSs.emplace_back(RHS);
     ReplacementContext RC;
 
-    if(CROW){
+    if(CROW && !CROWSendVerify){
         CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
+
         if(bridge->isOpen()){
 
           std::string RHString;
           llvm::raw_string_ostream SS(RHString);
 
-          auto S = GetReplacementLHSString(SC.BPCs, SC.PCs,
+          auto S = GetReplacementLHSStringWithBlockId(SC.BPCs, SC.PCs,
                                       SC.LHS, RC);
           PrintReplacementRHS(SS, RHS, RC, true);
-          bridge->sendKVPair(S, RHString);
+          bridge->sendKVPair(S, RHString, SC.LHS->CROWGlobalId);
         }
       }else{
         if(DebugLevel > 2)
@@ -834,17 +836,17 @@ std::error_code synthesizeWithKLEE(SynthesisContext &SC, std::vector<Inst *> &RH
 
       ReplacementContext RC;
 
-      if(CROW){
+      if(CROW && !CROWSendVerify){
         CROWSocketBridge* bridge = CROWSocketBridge::getInstance();
         if(bridge->isOpen()){
 
           std::string RHString;
           llvm::raw_string_ostream SS(RHString);
 
-          auto S = GetReplacementLHSString(SC.BPCs, SC.PCs,
+          auto S = GetReplacementLHSStringWithBlockId(SC.BPCs, SC.PCs,
                                       SC.LHS, RC);
           PrintReplacementRHS(SS, RHS, RC, true);
-          bridge->sendKVPair(S, RHString);
+          bridge->sendKVPair(S, RHString, SC.LHS->CROWGlobalId);
 
 
           if(DebugLevel > 0){

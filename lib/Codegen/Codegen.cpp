@@ -86,7 +86,8 @@ llvm::Value *Codegen::getValue(Inst *I) {
           ++DominanceCheckFailed;
         }
       } else {
-        report_fatal_error("Unhandled LLVM instruction in getValue()");
+        return nullptr;
+        //report_fatal_error("Unhandled LLVM instruction in getValue()");
       }
     }
     if (DebugLevel > 2)

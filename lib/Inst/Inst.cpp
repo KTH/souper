@@ -1022,7 +1022,7 @@ void souper::PrintReplacementLHS(llvm::raw_ostream &Out,
                                  const BlockPCs &BPCs,
                                  const std::vector<InstMapping> &PCs,
                                  Inst *LHS, ReplacementContext &Context,
-                                 bool printNames) {
+                                 bool printNames, bool printBlockId) {
   assert(LHS);
   assert(Context.empty());
 
@@ -1039,15 +1039,30 @@ void souper::PrintReplacementLHS(llvm::raw_ostream &Out,
   if (LHS->HarvestKind == HarvestType::HarvestedFromUse) {
     Out << " (harvestedFromUse)";
   }
+  //if (printBlockId) {
+  // In CROW a replacement in a different block is a different replacement
   Out << "\n";
+  Out << "; Block ID " << LHS->CROWGlobalId;
+  //}
+  //Out << "\n";
 }
+
+std::string souper::GetReplacementLHSStringWithBlockId(const BlockPCs &BPCs,
+    const std::vector<InstMapping> &PCs,
+    Inst *LHS, ReplacementContext &Context, bool printNames) {
+  std::string Str;
+  llvm::raw_string_ostream SS(Str);
+  PrintReplacementLHS(SS, BPCs, PCs, LHS, Context, false, true);
+  return SS.str();
+}
+
 
 std::string souper::GetReplacementLHSString(const BlockPCs &BPCs,
     const std::vector<InstMapping> &PCs,
     Inst *LHS, ReplacementContext &Context, bool printNames) {
   std::string Str;
   llvm::raw_string_ostream SS(Str);
-  PrintReplacementLHS(SS, BPCs, PCs, LHS, Context);
+  PrintReplacementLHS(SS, BPCs, PCs, LHS, Context, false, false);
   return SS.str();
 }
 

@@ -9,6 +9,8 @@ extern unsigned DebugLevel;
 bool CROW;
 unsigned CROWWorkers;
 unsigned CROWMaxReplacementSize;
+static unsigned CROWGlobalCandidateId = 1;
+unsigned* CROWGlobalCandidateIdPtr = &CROWGlobalCandidateId;
 
 bool CROWPruneSelect;
 bool CROWPruneUnaryOperatorOnConstant;
@@ -17,12 +19,20 @@ bool CROWOperateOnTwoConstants;
 bool CROWPruneSub;
 bool CROWPruneConstantSelect;
 bool CROWCheckMetadata;
+bool CROWCountFunctions;
+bool CROWCountFunctionsAndName;
+bool CROWDontRecheck;
+bool CROWRenameFunctions;
+
+
+bool CROWSendVerify;
+
 
 std::string SouperSubset;
-
+std::string CROWMangleFunction;
+std::string CROWMangleNewName;
 
 namespace souper {
-
 
 
     static cl::opt<bool, /*ExternalStorage=*/true> CROWFlag("souper-crow",
@@ -41,12 +51,56 @@ namespace souper {
         cl::location(CROWWorkers),
         cl::init(1));
         
+        
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWSendNoVerifyFlag(
+        "souper-crow-verify",
+        cl::desc("Verify when finish with the inferring"),
+        cl::location(CROWSendVerify),
+        cl::init(true));
+
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWRenameFunctionssFlag(
+        "souper-crow-rename",
+        cl::desc("Set CROW to rename function"),
+        cl::location(CROWRenameFunctions),
+        cl::init(false));
+
+    static cl::opt<std::string, /*ExternalStorage=*/true> CROWMangleFunctionFlag(
+        "souper-crow-mangle-function",
+        cl::desc("Rename function name"),
+        cl::location(CROWMangleFunction),
+        cl::init(""));
+
+    static cl::opt<std::string, /*ExternalStorage=*/true> CROWMangleNewNameFlag(
+        "souper-crow-mangle-function-name",
+        cl::desc("Rename function name by"),
+        cl::location(CROWMangleNewName),
+        cl::init(""));
+
+
     static cl::opt<bool, /*ExternalStorage=*/true> CROWCheckMetadataFlag(
         "souper-crow-check",
         cl::desc("Check only for metadata, not inferring"),
         cl::location(CROWCheckMetadata),
         cl::init(false));
         
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWCountFunctionsFlag(
+        "souper-crow-count",
+        cl::desc("Check only for metadata, not inferring"),
+        cl::location(CROWCountFunctions),
+        cl::init(false));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWCountFunctionsAndNameFlag(
+        "souper-crow-count_name",
+        cl::desc("Check only for metadata, not inferring"),
+        cl::location(CROWCountFunctionsAndName),
+        cl::init(false));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWDontRecheckFlag(
+        "souper-dont-recheck",
+        cl::desc("Do not recheck function after changing it"),
+        cl::location(CROWDontRecheck),
+        cl::init(false));
 
     static cl::opt<unsigned, /*ExternalStorage=*/true> CROWMaxReplacementSizeFlags(
         "souper-crow-max-replacement-size",
@@ -167,7 +221,6 @@ namespace souper {
 
         // create an instance of your own connection handler
        
-
         if(DebugLevel > 1)
             errs() << "Opening socket server on " << CROWPort << "\n";
       
@@ -180,8 +233,19 @@ namespace souper {
             sockfd = socket(AF_INET, SOCK_STREAM, 0);
             if(sockfd > -1){
                 opened = connect(sockfd, (struct sockaddr *)&address, sizeof(address)) == 0;
-                errs() << "Connection up and running\n";
-                return 1;
+                
+                if(opened){
+
+                    if(DebugLevel > 1)
+                        errs() << "Connection up and running\n";
+                    return 1;
+                }
+                else {
+
+                    if(DebugLevel > 1)
+                        errs() << "Error cannot connect\n";
+                    return 0;
+                }
             }
         }else{
             errs() << "Invaild IP " << CROWSocketHost << "\n";
@@ -220,7 +284,7 @@ namespace souper {
         return 1;
     }
 
-    void CROWSocketBridge::sendKVPair(std::string key, std::string replacement){
+    void CROWSocketBridge::sendKVPair(std::string key, std::string replacement, unsigned blockId){
 
         if(DebugLevel > 1)
             errs() << "Sending KV pair to CROW\n";
@@ -242,13 +306,18 @@ namespace souper {
                 }
                 
             }
+            std::string Str;
+            llvm::raw_string_ostream SS(Str);
 
-            std::string keyValuePair = "{\"key\": \"" +  key;
-            keyValuePair = keyValuePair + "\", \"value\": \"" + replacement;
-            keyValuePair = keyValuePair +  + "\"},";
+            SS <<  "{\"key\": \""  << key << "\",";
+            SS <<  "\"value\": \"" << replacement << "\",";
+            SS <<  "\"bId\":" << blockId ;
+            SS << "},";
 
-            int sent = send(sockfd , keyValuePair.data(), keyValuePair.size() , 0 );
-            
+
+            int sent = send(sockfd , SS.str().data(), SS.str().size() , 0 );
+
+            //errs() << "Sent" << keyValuePair << "\n";
 
         }
         else{
