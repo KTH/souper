@@ -84,7 +84,7 @@ set(GTEST_CXXFLAGS "-DGTEST_HAS_RTTI=0")
 set(GTEST_INCLUDEDIR "${LLVM_SRC}/utils/unittest/googletest/include")
 set(GTEST_LIBS "-lgtest_main -lgtest")
 
-set(LLVM_CXXFLAGS "${LLVM_CXXFLAGS} -std=c++17")
+set(LLVM_CXXFLAGS "${LLVM_CXXFLAGS} -fexceptions -std=c++17")
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(CMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD "c++17")
@@ -197,6 +197,8 @@ set(SOUPER_INFER_FILES
   include/souper/Infer/Preconditions.h
 )
 
+
+include_directories(include third_party/rabbitmq/amqpcpp/include)
 
 set(SOUPER_CROW_FILES
   lib/Crow/Crow.cpp
@@ -463,6 +465,7 @@ if(NOT GO_EXECUTABLE STREQUAL "GO_EXECUTABLE-NOTFOUND")
   target_include_directories(souperweb-backend PRIVATE "${LLVM_INCLUDEDIR}")
 
   target_link_libraries(souperweb-backend souperTool souperExtractor souperPass souperKVStore souperSMTLIB2 souperParser souperInst ${HIREDIS_LIBRARY})
+endif()
 
 
 add_library(profileRuntime STATIC

@@ -16,16 +16,16 @@
 
 if [ -d "third_party" ]; then
   echo "Directory third_party exists, remove this directory before running build_deps.sh."
+#  $sendtele "Directory third_party exists, remove this directory before running build_deps.sh."
   exit 1;
 fi
 
-ncpus=$(command nproc 2>/dev/null || command sysctl -n hw.ncpu 2>/dev/null || echo 8)
-
+ncpus=8
 # hiredis version 0.14.0
 hiredis_commit=685030652cd98c5414ce554ff5b356dfe8437870
 llvm_repo=https://github.com/Jacarte/llvm-project.git
 # llvm_commit specifies the git branch or hash to checkout to
-llvm_commit=disable-peepholes-v04
+llvm_commit=peephole-disabling-v4
 klee_repo=https://github.com/rsas/klee
 klee_branch=pure-bv-qf-llvm-7.0
 alive_commit=v1
@@ -42,9 +42,11 @@ fi
 z3_srcdir=$(pwd)/third_party/z3
 z3_builddir=$(pwd)/third_party/z3-build
 z3_installdir=$(pwd)/third_party/z3-install
+
 (git clone $z3_repo $z3_srcdir && git -C $z3_srcdir checkout $z3_commit)
 mkdir -p $z3_builddir
-(cd $z3_builddir && cmake -Wno-dev ../z3 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$z3_installdir -DZ3_BUILD_LIBZ3_SHARED=On -DZ3_BUILD_PYTHON_BINDINGS=Off && ninja && ninja install)
+(cd $z3_builddir && cmake -Wno-dev ../z3 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$z3_installdir -DZ3_BUILD_LIBZ3_SHARED=On -DZ3_BUILD_PYTHON_BINDINGS=Off && ninja && ninja install )
+
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   # Mac
@@ -70,20 +72,21 @@ llvm_srcdir=$(pwd)/third_party/llvm-project
 llvm_builddir=$(pwd)/third_party/llvm-${llvm_build_type}-build
 llvm_installdir=$(pwd)/third_party/llvm-${llvm_build_type}-install
 
-#mkdir -p $llvm_srcdir
-(git clone $llvm_repo $llvm_srcdir && cd $llvm_srcdir && git fetch && git checkout $llvm_commit && git pull)
+mkdir -p $llvm_srcdir
+(git clone --single-branch --branch $llvm_commit $llvm_repo $llvm_srcdir)
 
 mkdir -p $llvm_builddir
+mkdir -p $llvm_installdir
 
-cmake_flags="-DCMAKE_INSTALL_PREFIX=$llvm_installdir -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_FORCE_ENABLE_STATS=ON -DCMAKE_BUILD_TYPE=$llvm_build_type -DLLVM_ENABLE_Z3_SOLVER=OFF -DLLVM_TARGETS_TO_BUILD=WebAssembly  -DLLVM_ENABLE_PROJECTS=\'clang-tools-extra;lld;llvm;clang;compiler-rt\'"
+cmake_flags="-DCMAKE_INSTALL_PREFIX=$llvm_installdir -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_FORCE_ENABLE_STATS=ON -DCMAKE_BUILD_TYPE=$llvm_build_type -DLLVM_ENABLE_Z3_SOLVER=OFF -DLLVM_TARGETS_TO_BUILD=WebAssembly  -DLLVM_ENABLE_PROJECTS=\'clang-tools-extra;lld;llvm;clang;compiler-rt;llvm-config;\'"
 
 if [ -n "`which ninja`" ] ; then
   (cd $llvm_builddir && cmake ${llvm_srcdir}/llvm -G Ninja $cmake_flags -DCMAKE_CXX_FLAGS="-DDISABLE_WRONG_OPTIMIZATIONS_DEFAULT_VALUE=true -DDISABLE_PEEPHOLES_DEFAULT_VALUE=true" "$@")
-  ninja -C $llvm_builddir
-  ninja -C $llvm_builddir install
+  ninja -C $llvm_builddir 
+  ninja -C $llvm_builddir install 
 else
   (cd $llvm_builddir && cmake $cmake_flags -DCMAKE_CXX_FLAGS="-DDISABLE_WRONG_OPTIMIZATIONS_DEFAULT_VALUE=true -DDISABLE_PEEPHOLES_DEFAULT_VALUE=true" "$@")
-  make -C $llvm_builddir -j $ncpus
+  make -C $llvm_builddir -j $ncpus 
   make -C $llvm_builddir -j $ncpus install
 fi
 

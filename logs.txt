@@ -1,0 +1,28 @@
+#1 [internal] load build definition from Dockerfile
+#1 sha256:bb31b99164cff15881f41885d6c561d99be190604fa8ca227cce66c0f80370e2
+#1 transferring dockerfile: 1.68kB done
+#1 DONE 0.0s
+
+#2 [internal] load .dockerignore
+#2 sha256:edcfae091877470240964af233bdd59c912d2ed1c00e9b1d8e640954700282eb
+#2 transferring context:
+#2 transferring context: 64B 0.0s done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/library/ubuntu:20.04
+#3 sha256:8e67b796a66f85f06793e026943184e32d365c77929e94d2ac98b34a1e1cb30e
+#3 DONE 0.7s
+
+#4 [ 1/19] FROM docker.io/library/ubuntu:20.04@sha256:703218c0465075f4425e58fac086e09e1de5c340b12976ab9eb8ad26615c3715
+#4 sha256:d1845b1399a692499c60192e090e13fad8aad3fb3ee0dcc3992970b5470b338e
+#4 DONE 0.0s
+
+#8 [internal] load build context
+#8 sha256:03048e391754d8bdfedea8a0d52f42aad17a4efc65c0c70b4fc3b74d98d17344
+#8 transferring context: 1.46MB 0.3s done
+#8 DONE 0.3s
+
+#24 exporting to image
+#24 sha256:e8c613e07b0b7ff33893b694f7759a10d42e180f2b4dc349fb57dc6b71dcab00
+#24 exporting layers
+time="2021-02-18T10:52:44+01:00" level=error msg="got 3 SIGTERM/SIGINTs, forcing shutdown"

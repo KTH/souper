@@ -50,14 +50,17 @@ namespace souper {
 				return check_function(this, instr);
 			}
 
+
+			static std::map<std::string, std::string> inlineCache;
+			
 		protected:
 			int sockfd = -1;
 			bool opened = false;
 			struct sockaddr_in address; 
+			CROWSocketBridge() : sockfd(-1),opened(false) {} // private constructor
 
 		private:
 			static CROWSocketBridge* inst_;   // The one, single instance
-			CROWSocketBridge() : sockfd(-1),opened(false) {} // private constructor
 			CROWSocketBridge(const CROWSocketBridge&);
 			CROWSocketBridge& operator=(const CROWSocketBridge&);
 			bool check_default(Inst *I){

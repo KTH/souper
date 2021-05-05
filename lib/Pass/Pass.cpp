@@ -356,13 +356,16 @@ public:
           // report_fatal_error("Unable to query solver: " + EC.message() + "\n");
         }
       }
+
+      if(CROW){
+        rk_sema_post(&mutex);
+        exit(0);
+      }
+
       if (RHSs.empty()){
-        if(CROW){
-          rk_sema_post(&mutex);
-          exit(0);
-        }
         continue;
       }
+
 
 
       Instruction *I = Cand.Origin;
@@ -383,28 +386,7 @@ public:
         NewVal = getValue(Cand.Mapping.RHS, I, EBC, DT,
                                ReplacedValues, Builder, F->getParent());
 
-        if(CROWSendVerify && NewVal){
-
-          if(bridge->isOpen()){
-              ReplacementContext RC;
-              std::string RHString;
-              llvm::raw_string_ostream SS(RHString);
-
-
-              std::string S;
-              llvm::raw_string_ostream SS1(S);
-
-              PrintReplacementLHS(SS1, Cand.BPCs, Cand.PCs, Cand.Mapping.LHS, RC, true);
-              PrintReplacementRHS(SS, Cand.Mapping.RHS, RC, true);
-              bridge->sendKVPair(S, RHString, Cand.Mapping.LHS->CROWGlobalId);
-              
-              if (DebugLevel > 2){
-                errs() << "Valid" << "\n";
-                errs() << S << "\n";
-                errs() << RHString << "\n";
-              }
-          }
-        }
+        
         it++;
         if(it == RHSs.end()){
           if (DebugLevel > 1)
@@ -413,10 +395,6 @@ public:
         }
       }
 
-      if(CROW){
-        rk_sema_post(&mutex);
-        exit(0);
-      }
       // if LHS comes from use, then NewVal should be a constant
       assert(Cand.Mapping.LHS->HarvestKind != HarvestType::HarvestedFromUse ||
              isa<llvm::Constant>(NewVal));

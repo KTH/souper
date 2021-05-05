@@ -26,7 +26,8 @@ bool CROWRenameFunctions;
 
 
 bool CROWSendVerify;
-
+bool CROWInlineCache;
+bool CROWVerify;
 
 std::string SouperSubset;
 std::string CROWMangleFunction;
@@ -56,8 +57,14 @@ namespace souper {
         "souper-crow-verify",
         cl::desc("Verify when finish with the inferring"),
         cl::location(CROWSendVerify),
-        cl::init(true));
+        cl::init(false));
 
+        
+    static cl::opt<bool, /*ExternalStorage=*/true> CROWInlineCacheFlag(
+        "souper-crow-inline-cache",
+        cl::desc("Read cache from cli options"),
+        cl::location(CROWInlineCache),
+        cl::init(false));
 
     static cl::opt<bool, /*ExternalStorage=*/true> CROWRenameFunctionssFlag(
         "souper-crow-rename",
@@ -70,6 +77,15 @@ namespace souper {
         cl::desc("Rename function name"),
         cl::location(CROWMangleFunction),
         cl::init(""));
+    
+
+    
+    static cl::list<std::string> CROWInlineCacheKeys("souper-crow-cache-inlinek",
+                                     cl::desc("Comma separated keys to use as inline cache"));
+
+    
+    static cl::list<std::string> CROWInlineCacheValues("souper-crow-cache-inlinev",
+                                     cl::desc("Comma separated keys to use as inline cache"));
 
     static cl::opt<std::string, /*ExternalStorage=*/true> CROWMangleNewNameFlag(
         "souper-crow-mangle-function-name",
@@ -161,6 +177,8 @@ namespace souper {
         cl::init(1),
         cl::desc("CROW socket wait timeout"));
 
+
+
     void rk_sema_destroy(struct rk_sema *s)
     {
     #ifdef __APPLE__
@@ -210,9 +228,31 @@ namespace souper {
     // Define the static Singleton pointer
     CROWSocketBridge* CROWSocketBridge::inst_ = NULL;
 
+    std::map<std::string, std::string> CROWSocketBridge::inlineCache;
+
     CROWSocketBridge* CROWSocketBridge::getInstance() {
         if (inst_ == NULL) {
             inst_ = new CROWSocketBridge();
+
+            
+            assert(CROWInlineCacheKeys.size() == CROWInlineCacheValues.size()); 
+
+            for (std::size_t i = 0; i != CROWInlineCacheKeys.size(); ++i) {
+                // access element as v[i]
+                auto k1 = CROWInlineCacheKeys[i];
+                auto v1 = CROWInlineCacheValues[i];
+
+                CROWSocketBridge::inlineCache[k1] = v1;
+
+
+                /*                
+                errs() << "=========\n";
+                errs() << k1 << "\n";
+                errs() << "=========\n";
+                errs() << v1 << "\n";
+                */
+                // any code including continue, break, return
+            }
         }
         return(inst_);
     }
@@ -251,6 +291,7 @@ namespace souper {
             errs() << "Invaild IP " << CROWSocketHost << "\n";
         }
         
+
         return 0;
     }
 

@@ -30,6 +30,7 @@
 #include "souper/Infer/Pruning.h"
 #include "souper/KVStore/KVStore.h"
 #include "souper/Parser/Parser.h"
+#include "souper/Crow/Crow.h"
 
 #include <unordered_map>
 
@@ -42,6 +43,9 @@ STATISTIC(ExternalMisses, "Number of external cache misses");
 
 using namespace souper;
 using namespace llvm;
+
+extern bool CROWInlineCache;
+extern bool CROWInlineCache;
 
 namespace {
 
@@ -651,7 +655,21 @@ public:
     ReplacementContext Context;
     std::string Repl = GetReplacementLHSString(BPCs, PCs, LHS, Context);
     const auto &ent = InferCache.find(Repl);
-    if (ent == InferCache.end()) {
+
+    if(CROWInlineCache && CROWSocketBridge::inlineCache.count(Repl)){
+      
+      std::string ES;
+
+
+      ParsedReplacement R = ParseReplacementRHS(IC, "<cache>", CROWSocketBridge::inlineCache[Repl], Context, ES);
+      if (ES != "")
+        return std::make_error_code(std::errc::protocol_error);
+
+      RHSs.emplace_back(R.Mapping.RHS);
+      
+      return std::error_code();
+    }
+    else if (ent == InferCache.end()) {
       ++MemMissesInfer;
       std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHSs,
                                                    AllowMultipleRHSs, IC);
@@ -809,6 +827,7 @@ public:
     if (LHSStr.length() > MaxLHSSize)
       return std::make_error_code(std::errc::value_too_large);
     std::string S;
+
     if (KV->hGet(LHSStr, "result", S)) {
 
       ++ExternalHits;
@@ -946,3 +965,9 @@ std::unique_ptr<Solver> createExternalCachingSolver(
 }
 
 }
+
+
+/*
+
+    
+*/
